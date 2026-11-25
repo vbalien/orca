@@ -1,0 +1,12 @@
+# 포크 릴리즈의 필수 설치 파일(@V@ = 앱 버전). 워크플로(fork-release.yml)와 fork/verify-linux-release.sh가 같이 읽는다.
+orca-linux.AppImage
+orca-linux-arm64.AppImage
+orca-ide_@V@_amd64.deb
+orca-ide_@V@_arm64.deb
+orca-ide-@V@.x86_64.rpm
+orca-ide-@V@.aarch64.rpm
+orca-windows-setup.exe
+orca-macos-x64.dmg
+orca-macos-arm64.dmg
+Orca-@V@-mac.zip
+Orca-@V@-arm64-mac.zip
