@@ -142,7 +142,9 @@ describe('a send that waits on its muted thread', () => {
     expect(wakeGate).toHaveBeenCalledTimes(1)
     expect(calls.send.mock.calls[0]?.[0]).toMatchObject({ admit: admitted })
     expect(turnAutomations).toHaveBeenCalledTimes(1)
-    expect(calls.send.mock.calls[0]?.[3]).not.toHaveProperty('note')
+    expect(calls.send.mock.lastCall).not.toContainEqual(
+      expect.objectContaining({ note: expect.anything() })
+    )
   })
 })
 

@@ -113,8 +113,13 @@ export class SlackGateDecider {
         verdict: gate.onError,
         reason: 'error',
         durationMs: elapsed(),
-        error: why === 'timeout' ? `Timed out after ${gate.timeoutSeconds}s` : outcome.error,
-        ...(why === 'timeout' || outcome.timedOut ? { timedOut: true } : {}),
+        error:
+          why === 'timeout' || outcome.kind === 'verdict'
+            ? `Timed out after ${gate.timeoutSeconds}s`
+            : outcome.error,
+        ...(why === 'timeout' || (outcome.kind === 'error' && outcome.timedOut)
+          ? { timedOut: true }
+          : {}),
         ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {})
       })
     } finally {
