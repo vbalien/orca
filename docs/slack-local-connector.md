@@ -102,6 +102,12 @@ Keep both private. Orca never shows them again once saved.
 3. Enter **Your Slack member ID** (Slack → your profile → ⋯ → Copy member ID). Only you can ask
    until you add other people by their member IDs.
 4. Invite the bot to the channels where it should answer (`/invite @bot`).
+5. Optional: **Check before waking** (at the end of the same page) works as it does with Orca Cloud's
+   app. It runs on this computer after Who can ask, before the bot wakes; a blocked, failed, late or
+   cancelled check starts nothing and posts nothing. It reads the message, its place, the asker's
+   role, the thread context Orca read, and marks for anything left out (earlier messages not shown,
+   a thread that couldn't be read, or a bare mention whose earlier request is unknown). A TypeSafe
+   Jev check sends that text to TypeSafe.
 
 ## 4. Try it
 

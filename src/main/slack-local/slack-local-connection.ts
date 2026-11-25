@@ -2,9 +2,10 @@
 import { hostname } from 'node:os'
 import type { Bot } from '../../shared/bot-types'
 import { runtimeConversationHost } from '../external-conversations/external-conversation-runtime-host'
-import { ALWAYS_WAKE, SlackLocalInbound, type LocalSlackWakeGate } from './slack-local-inbound'
+import { SlackLocalInbound } from './slack-local-inbound'
 import { slackLocalReads } from './slack-local-reads'
 import { SlackLocalReplies } from './slack-local-replies'
+import { localSlackWakeGate, type LocalSlackWakeGate } from './slack-local-wake-gate'
 import type { SlackLocalSecrets } from './slack-local-token-store'
 import {
   SlackSocketModeClient,
@@ -44,7 +45,7 @@ export function slackLocalConnection(input: {
     seam: () => runtime.getExternalConversationSeam(),
     host: () => runtimeConversationHost(runtime),
     reads: slackLocalReads(input.fetch, secrets.botToken, abort.signal),
-    wakeGate: input.wakeGate ?? ALWAYS_WAKE,
+    wakeGate: input.wakeGate ?? localSlackWakeGate(),
     signal: abort.signal
   })
   const replies = new SlackLocalReplies({

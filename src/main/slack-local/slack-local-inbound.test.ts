@@ -4,7 +4,8 @@ import { expect, it } from 'vitest'
 import type { Bot } from '../../shared/bot-types'
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
 import { readLocalSlackEvent } from './slack-local-events'
-import { SlackLocalInbound, type LocalSlackWakeGate } from './slack-local-inbound'
+import { SlackLocalInbound } from './slack-local-inbound'
+import type { LocalSlackWakeGate } from './slack-local-wake-gate'
 
 const identity = { teamId: 'T1', botUserId: 'U0BOT', appId: 'A1' }
 let nextEvent = 0
@@ -160,9 +161,9 @@ it('asks again when the chat takes it, and wakes once for a mention however its 
 
   // In its own thread, the message event and app_mention of one mention: the gate sees a mention.
   const cases: string[] = []
-  const linked = harness(async (input) => {
-    cases.push(input.case)
-    return input.case === 'mention' ? 'wake' : 'block'
+  const linked = harness(async (_bot, event) => {
+    cases.push(event.case)
+    return event.case === 'mention' ? 'wake' : 'block'
   }, 'b1')
   const thread = { channel_type: 'channel', thread_ts: '1800000000.000100', text: '<@U0BOT> again' }
   linked.inbound.receive(envelope({ type: 'message', ...thread }))

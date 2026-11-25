@@ -303,13 +303,6 @@ export function botLinearWorkspaces(
   return bot.linearWorkspaces ?? (bot.linear ? [bot.linear] : [])
 }
 
-/** Whether the cloud can bring the bot work: a Slack app, a Linear workspace or a GitHub link. */
-export function botHasConnector(
-  bot: Pick<Bot, 'slack' | 'slackApps' | 'linear' | 'linearWorkspaces' | 'github'>
-): boolean {
-  return botSlackApps(bot).length > 0 || botLinearWorkspaces(bot).length > 0 || bot.github !== null
-}
-
 /**
  * Slack people saved before workspaces, tagged with the bot's first Slack workspace, the only one
  * there was. Untouched without a Slack workspace (they show on a row of their own).
