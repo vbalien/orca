@@ -210,7 +210,10 @@ export function BotSlackGateJevEditor(props: {
             </p>
           )}
         </Disclosure>
-        <DialogContent className="max-h-[calc(100vh-4rem)] sm:max-w-[min(56rem,calc(100vw-4rem))]">
+        <DialogContent
+          aria-labelledby={`${id}-wide-title`}
+          className="max-h-[calc(100vh-4rem)] sm:max-w-[min(56rem,calc(100vw-4rem))]"
+        >
           <DialogTitle id={`${id}-wide-title`}>
             {t('bots.slack.gate.jev.label', 'Jev rules (JSON)')}
           </DialogTitle>

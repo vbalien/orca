@@ -10,7 +10,10 @@ const MAX_ISSUES = 50
 
 export class Issues {
   readonly list: SlackGateJevIssue[] = []
+  /** Every problem found, also past the ones kept: what tells valid from not. */
+  count = 0
   add(path: SlackGateJevPath, code: SlackGateJevIssueCode, params?: SlackGateJevIssue['params']) {
+    this.count++
     if (this.list.length < MAX_ISSUES) {
       this.list.push({ path, code, ...(params ? { params } : {}) })
     }

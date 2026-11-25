@@ -51,7 +51,7 @@ function validateQuestion(
     issues.add([...path, 'type'], 'question_type')
     return null
   }
-  const before = issues.list.length
+  const before = issues.count
   onlyKeys(issues, value, path, ['type', 'instructions', 'criteria'])
   optionalString(issues, value.instructions, [...path, 'instructions'])
   const criteria = value.criteria
@@ -96,7 +96,7 @@ function validateQuestion(
       }
     })
   }
-  if (issues.list.length > before) {
+  if (issues.count > before) {
     return null
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: every field was checked above.
@@ -124,7 +124,26 @@ function validateExtraValue(issues: Issues, root: unknown, rootPath: SlackGateJe
       ? value.map((entry, index) => [index, entry])
       : Object.entries(value)
     for (const [key, child] of entries) {
-      // TypeSafe replaces asset placeholders anywhere; Slack gates send none.
+      stack.push({ value: child, path: [...path, key], depth: depth + 1 })
+    }
+  }
+}
+
+/** TypeSafe swaps asset placeholders in anywhere; Slack gates send none, so `assets` is refused as a
+ *  key at any depth (bounded: deeper levels are already refused as too deep). */
+function refuseAssetKeys(issues: Issues, root: Record<string, unknown>): void {
+  const stack: { value: unknown; path: SlackGateJevPath; depth: number }[] = [
+    { value: root, path: [], depth: 0 }
+  ]
+  while (stack.length > 0) {
+    const { value, path, depth } = stack.pop()!
+    if (typeof value !== 'object' || value === null || depth > SLACK_GATE_JEV_MAX_DEPTH + 2) {
+      continue
+    }
+    const entries: [string | number, unknown][] = Array.isArray(value)
+      ? value.map((entry, index) => [index, entry])
+      : Object.entries(value)
+    for (const [key, child] of entries) {
       if (key === 'assets') {
         issues.add([...path, key], 'assets_unsupported')
       }
@@ -164,12 +183,11 @@ export function validateSlackGateJev(value: unknown): SlackGateJevValidation {
     return { ok: false, issues: issues.list }
   }
   for (const key of Object.keys(value)) {
-    if (key === 'assets') {
-      issues.add([key], 'assets_unsupported')
-    } else if (!TOP_KEYS.has(key)) {
+    if (key !== 'assets' && !TOP_KEYS.has(key)) {
       issues.add([key], 'unknown_key')
     }
   }
+  refuseAssetKeys(issues, value)
   if (value.model !== undefined) {
     if (typeof value.model !== 'string') {
       issues.add(['model'], 'not_string')
@@ -234,7 +252,7 @@ export function validateSlackGateJev(value: unknown): SlackGateJevValidation {
       issues.add([key], 'enum', { allowed: allowed.join(', ') })
     }
   }
-  if (issues.list.length > 0) {
+  if (issues.count > 0) {
     return { ok: false, issues: issues.list }
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: validated above field by field.
