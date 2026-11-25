@@ -240,6 +240,7 @@ import {
   BotShareStatusParams,
   BotShareStop
 } from './bots-share-params'
+import { SlackGateBot, SlackGateSet, SlackGateSetKey } from './bots-slack-gate-params'
 import {
   BotToolAdd,
   BotToolFinishSignIn,
@@ -1374,6 +1375,10 @@ export const RPC_PARAMS_BY_METHOD = {
   'bots.slack.setPostAs': BotSlackPostAs,
   'bots.slack.setUpApp': BotSlackSetUp,
   'bots.slack.state': BotSlackBot,
+  'bots.slackGate.clearKey': SlackGateBot,
+  'bots.slackGate.set': SlackGateSet,
+  'bots.slackGate.setKey': SlackGateSetKey,
+  'bots.slackGate.status': SlackGateBot,
   'bots.suggest': BotSuggest,
   'bots.suggestions.dismiss': BotSuggestionAct,
   'bots.suggestions.start': BotSuggestionAct,

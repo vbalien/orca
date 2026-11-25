@@ -7,8 +7,11 @@ import type {
 import type { ConnectorTurnAutomation } from '../../shared/connector-trigger-event-contract'
 import type { TurnAutomations } from './connector-turn-automations'
 import type { RecordHandled, ThreadMuteOutcome } from './connector-thread-mute'
-import type { ExternalConversationHost } from '../external-conversations/external-conversation-host'
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
+import type {
+  ConversationAdmission,
+  ExternalConversationHost
+} from '../external-conversations/external-conversation-host'
 import type { ConnectorAccountTransport } from './connector-transport'
 import type { ConnectorWakeSocketFactory } from './connector-wake-socket'
 
@@ -27,8 +30,12 @@ export type ConnectorMachine = {
   /** A bounded wait, never rejecting, for what `bots` reads asynchronously: the first hello is whole. */
   beforeFirstHello?: () => Promise<void>
   triggers: () => ConnectorTrigger[]
-  /** Hands a matched event to its bot automation; false once the automation no longer takes it. */
-  runTrigger: (delivery: Extract<ConnectorDelivery, { kind: 'trigger' }>) => Promise<boolean>
+  /** Hands a matched event to its bot automation; false once the automation no longer takes it,
+   *  'expired' when its wake gate's deadline (`deadlineAt`, this machine's clock) passed first. */
+  runTrigger: (
+    delivery: Extract<ConnectorDelivery, { kind: 'trigger' }>,
+    deadlineAt?: number
+  ) => Promise<boolean | 'expired'>
   /** The automations a bot's start or send also carries, run in that turn; null for none. */
   turnAutomations?: (entries: readonly ConnectorTurnAutomation[]) => TurnAutomations | null
   /** A send a bot thread's mute handles before the agent (accepted, no turn); null when it goes on
@@ -38,6 +45,18 @@ export type ConnectorMachine = {
     record: RecordHandled,
     carriedBefore?: Promise<boolean>
   ) => ThreadMuteOutcome | null
+  /** The bot's Slack wake gate for a start or send (with the sends that ride its turn), asked in
+   *  the conversation's lane before delivery; undefined when no gate applies. */
+  wakeGate?: (
+    delivery: Extract<ConnectorDelivery, { kind: 'start' | 'send' }>,
+    later: readonly Extract<ConnectorDelivery, { kind: 'send' }>[],
+    deadlineAt: number
+  ) => ConversationAdmission | undefined
+  /** Whether a send must not ride a start or send's turn, because a wake gate judges them apart. */
+  wakeGateApart?: (
+    head: Extract<ConnectorDelivery, { kind: 'start' | 'send' }>,
+    next: Extract<ConnectorDelivery, { kind: 'send' }>
+  ) => boolean
   /** Tells the bot's owner about one of its hooks; false when the hook isn't this machine's. */
   webhookNotice?: (
     delivery: Extract<ConnectorDelivery, { kind: 'webhook_notice' }>

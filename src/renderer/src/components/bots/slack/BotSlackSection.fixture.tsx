@@ -61,30 +61,37 @@ function host(bot: Bot, options: { requests?: boolean; photo?: boolean } = {}): 
   })
   const call = window.api.runtime.call
   window.api.runtime.call = async (args) =>
-    args.method === 'bots.access.list'
+    args.method === 'bots.slackGate.status'
       ? {
-          id: 'access-list',
+          id: 'slack-gate-status',
           ok: true,
           _meta: { runtimeId: 'fixture' },
-          result: {
-            ok: true,
-            value: options.requests
-              ? [
-                  {
-                    requestId: 'r1',
-                    botId: bot.id,
-                    source: 'slack',
-                    workspaceId: 'T1',
-                    workspaceName: 'Globex',
-                    requester: { id: 'U-dana', name: 'Dana Kim', handle: 'dana', detail: '' },
-                    createdAt: Date.now() - 4 * 60_000,
-                    expiresAt: Date.now() + 86_400_000
-                  }
-                ]
-              : []
-          }
+          result: { apiKeySet: false, sealing: 'os-keychain' }
         }
-      : call(args)
+      : args.method === 'bots.access.list'
+        ? {
+            id: 'access-list',
+            ok: true,
+            _meta: { runtimeId: 'fixture' },
+            result: {
+              ok: true,
+              value: options.requests
+                ? [
+                    {
+                      requestId: 'r1',
+                      botId: bot.id,
+                      source: 'slack',
+                      workspaceId: 'T1',
+                      workspaceName: 'Globex',
+                      requester: { id: 'U-dana', name: 'Dana Kim', handle: 'dana', detail: '' },
+                      createdAt: Date.now() - 4 * 60_000,
+                      expiresAt: Date.now() + 86_400_000
+                    }
+                  ]
+                : []
+            }
+          }
+        : call(args)
   void refreshAccessRequests()
 }
 

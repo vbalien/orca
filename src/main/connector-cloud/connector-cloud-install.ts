@@ -10,7 +10,9 @@ import type { ConnectorGitHubInstallations } from './connector-github-installati
 import type { ConnectorRuntimeKind } from './connector-machine'
 import { connectorBots, type ConnectorPlacesStore } from './connector-places'
 import { connectorAccount, desktopConnectorTokenMint } from './connector-token-mint'
-import { connectorTriggers, runTriggerDelivery } from './connector-triggers'
+import { connectorTriggers, runTriggerDelivery, triggerRunEvent } from './connector-triggers'
+import { createConnectorWakeGate } from './connector-wake-gate'
+import { findLink } from '../external-conversations/external-conversation-links'
 import { hostNeedsConnector } from './connector-connection-need'
 import type { WebhookHostService } from '../webhooks/webhook-host-service'
 import { botPlaceMigrationOnHello } from '../automations/bot-automation-ref-migration'
@@ -104,6 +106,13 @@ export function createConnectorCloud({
   // Batches held when Orca last quit go out when due.
   prWaker.resume()
   const muteDeps = threadMuteDeps(runtime, store)
+  const wakeGate = createConnectorWakeGate({
+    bots: () => store.getBots?.() ?? [],
+    botsEnabled: () => runtime.bots.enabled(),
+    linkedBot: (key) => findLink(store, key)?.link.bot?.botId ?? null,
+    mentionsKnown: muteDeps.mentionsKnown ?? (() => true),
+    heldStart: (key) => runtime.getExternalConversationSeam()?.receipts.heldStart(key) ?? false
+  })
   return new ConnectorCloud({
     userDataPath,
     origin: resolveConnectorOrigin(process.env, environment.isPackaged()),
@@ -138,22 +147,41 @@ export function createConnectorCloud({
       },
       triggers: () =>
         connectorTriggers(store.listAutomations(), (hookId) => webhooks.pausing(hookId)),
-      runTrigger: (delivery) =>
-        runTriggerDelivery(
+      runTrigger: async (delivery, deadlineAt) => {
+        let expired = false
+        const ran = await runTriggerDelivery(
           {
             automations: store.listAutomations(),
             bots: store.getBots?.() ?? [],
             webhook: (call, event) => webhooks.receive(call, event),
-            run: (id, event) => runtime.runAutomationForEvent(id, event)
+            run: (id, event) =>
+              runtime.runAutomationForEvent(
+                id,
+                event,
+                wakeGate.triggerGate(delivery, event, deadlineAt, () => (expired = true))
+              )
           },
           delivery
-        ),
+        )
+        return expired ? 'expired' : ran
+      },
+      wakeGate: wakeGate.wakeGate,
+      wakeGateApart: wakeGate.wakeGateApart,
       turnAutomations: (entries) =>
-        turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {
-          takes: (id, event) =>
-            takingAutomation(store, id, event) !== null && !eventRun(store, id, event),
-          run: (id, event, inTurn) => runtime.runAutomationForEvent(id, event, inTurn)
-        }),
+        // A Slack automation whose bot gates triggers comes on its own, through that gate: the one
+        // inTurn flag can't leave out a single entry, so none rides the turn.
+        entries.some(
+          (entry) =>
+            wakeGate.gatesTrigger(entry.botId) &&
+            triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source ===
+              'slack'
+        )
+          ? null
+          : turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {
+              takes: (id, event) =>
+                takingAutomation(store, id, event) !== null && !eventRun(store, id, event),
+              run: (id, event, inTurn) => runtime.runAutomationForEvent(id, event, inTurn)
+            }),
       // Connectors off: no seam, so no bot thread to mute.
       threadMute: (delivery, record, carriedBefore) =>
         runtime.getExternalConversationSeam()
