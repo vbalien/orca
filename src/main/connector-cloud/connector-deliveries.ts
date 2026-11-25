@@ -17,12 +17,16 @@ import type { ConnectorMachine } from './connector-machine'
 import { withoutAutomations } from './connector-thread-mute'
 import type { Delivery } from '../external-conversations/external-conversation-types'
 import type { TurnAutomations } from './connector-turn-automations'
+import { gateDeadline, gatedHost, gateSnapshot, triggerResult } from './connector-wake-gate-host'
+
+/** A delivery's settled result; `held` (its wake gate blocked it) stays on this machine. */
+export type DispatchResult = ConnectorDeliveryResult & { held?: true }
 
 export type DispatchedDelivery = {
   deliveryId: string
   /** False when only done is sent: refused without calling the seam, or a trigger. */
   received: boolean
-  done: Promise<ConnectorDeliveryResult>
+  done: Promise<DispatchResult>
   /** Admitted through the reply outbox: `received` follows its admission. */
   viaOutbox?: true
   /** Held by a thread's mute: whether it went on carrying its batch's later sends, once decided. */
@@ -30,14 +34,14 @@ export type DispatchedDelivery = {
 }
 
 /** A thrown seam call (e.g. a conversation that no longer exists) is a refusal, not a lost delivery. */
-function settle(call: () => Promise<ConnectorDeliveryResult>): Promise<ConnectorDeliveryResult> {
-  let running: Promise<ConnectorDeliveryResult>
+function settle(call: () => Promise<DispatchResult>): Promise<DispatchResult> {
+  let running: Promise<DispatchResult>
   try {
     running = call()
   } catch (error) {
     running = Promise.reject(error)
   }
-  return running.catch((error: unknown): ConnectorDeliveryResult => ({
+  return running.catch((error: unknown): DispatchResult => ({
     outcome: 'refused',
     reason: error instanceof Error && error.message ? error.message : 'failed'
   }))
@@ -93,7 +97,7 @@ export async function recordedDeliveryResult(
 
 export type DispatchMachine = Pick<
   ConnectorMachine,
-  'runTrigger' | 'webhookNotice' | 'turnAutomations' | 'prEvent' | 'threadMute'
+  'runTrigger' | 'webhookNotice' | 'turnAutomations' | 'prEvent' | 'threadMute' | 'wakeGate'
 >
 export type RequestDelivery = Extract<ConnectorDelivery, { kind: 'start' | 'send' }>
 export type SendDelivery = Extract<ConnectorDelivery, { kind: 'send' }>
@@ -160,9 +164,7 @@ export function dispatchDelivery(
   }
   if (delivery.kind === 'trigger') {
     const done = settle(async () =>
-      (await machine.runTrigger(delivery))
-        ? { outcome: 'accepted' }
-        : { outcome: 'refused', reason: 'automation_not_listening' }
+      triggerResult(await machine.runTrigger(delivery, gateDeadline(delivery, msLeft)))
     )
     // Confirmed only by its done: until then the cloud resends it, and the run's event key keeps
     // a resend from running twice.
@@ -216,7 +218,7 @@ export function dispatchDelivery(
     const muted = machine.threadMute?.(delivery, record, carriedBefore)
     if (muted) {
       // Held until decided; one that then goes on carries its batch's later sends, as it would have.
-      const alone = { ...machine, threadMute: undefined }
+      const alone = { ...gateSnapshot(machine, delivery, later, msLeft), threadMute: undefined }
       let carried = (_carries: boolean): void => {}
       const carriedLater = new Promise<boolean>((resolve) => (carried = resolve))
       const done = settle(async (): Promise<ConnectorDeliveryResult> => {
@@ -241,7 +243,8 @@ export function dispatchDelivery(
   }
   // Every other kind belongs to a thread.
   const key = delivery.conversation
-  let done: Promise<ConnectorDeliveryResult>
+  const gated = gatedHost(machine, host, delivery, later, msLeft)
+  let done: Promise<DispatchResult>
   switch (delivery.kind) {
     case 'start': {
       // Only a bot's home takes a start.
@@ -268,7 +271,7 @@ export function dispatchDelivery(
         seam,
         key,
         inTurn,
-        settle(async () => (await seam.start(host, key, deliveryId, input)).initial)
+        settle(async () => (await seam.start(gated, key, deliveryId, input)).initial)
       )
       break
     }
@@ -289,7 +292,7 @@ export function dispatchDelivery(
         seam,
         key,
         inTurn,
-        settle(() => seam.send(host, key, deliveryId, message))
+        settle(() => seam.send(gated, key, deliveryId, message))
       )
       break
     }
@@ -325,10 +328,11 @@ async function recordedInTurn(
   seam: ExternalConversationSeam,
   key: ConnectorConversation,
   inTurn: TurnAutomations | null,
-  done: Promise<ConnectorDeliveryResult>
-): Promise<ConnectorDeliveryResult> {
+  done: Promise<DispatchResult>
+): Promise<DispatchResult> {
   const result = await done
-  if (!inTurn || result.outcome !== 'accepted') {
+  // Held by its wake gate: no turn ran them, so the cloud starts its automations on their own.
+  if (!inTurn || result.outcome !== 'accepted' || result.held) {
     return result
   }
   try {

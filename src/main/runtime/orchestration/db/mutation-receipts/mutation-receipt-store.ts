@@ -204,6 +204,27 @@ export function getMutationReceipt(
     .get(callerFingerprint, requestId) as MutationReceiptRow | undefined
 }
 
+/** Completed receipts of one caller and method whose request id starts with `requestIdPrefix`,
+ *  read through the primary key's range. */
+export function listCompletedMutationReceipts(
+  this: OrchestrationDb,
+  callerFingerprint: string,
+  requestIdPrefix: string,
+  method: string
+): (string | null)[] {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: one TEXT column selected.
+  const rows = this.db
+    .prepare(
+      `SELECT receipt FROM mutation_receipts
+       WHERE caller_fingerprint = ? AND request_id >= ? AND request_id < ?
+         AND method = ? AND state = 'completed'`
+    )
+    .all(callerFingerprint, requestIdPrefix, `${requestIdPrefix}\uffff`, method) as {
+    receipt: string | null
+  }[]
+  return rows.map((row) => row.receipt)
+}
+
 export type MutationReceiptStoreMethods = {
   getOrCreateLocalMutationCallerFingerprint: typeof getOrCreateLocalMutationCallerFingerprint
   beginMutationReceipt: typeof beginMutationReceipt
@@ -213,6 +234,7 @@ export type MutationReceiptStoreMethods = {
   countPendingMutationReceipts: typeof countPendingMutationReceipts
   settlePendingMutationReceipts: typeof settlePendingMutationReceipts
   getMutationReceipt: typeof getMutationReceipt
+  listCompletedMutationReceipts: typeof listCompletedMutationReceipts
 }
 
 export function attachMutationReceiptStore(ctor: { prototype: object }): void {
@@ -224,6 +246,7 @@ export function attachMutationReceiptStore(ctor: { prototype: object }): void {
     discardPendingMutationReceipt,
     countPendingMutationReceipts,
     settlePendingMutationReceipts,
-    getMutationReceipt
+    getMutationReceipt,
+    listCompletedMutationReceipts
   })
 }

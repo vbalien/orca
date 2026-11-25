@@ -18,6 +18,7 @@ import {
   isBotRetiredAgent,
   migrateRetiredBotAgent
 } from './bots/bot-retired-agents'
+import { BotSlackGateSchema } from './bots/bot-slack-gate'
 
 /** Native-chat agents a bot cannot run on yet; each waits on a live check of its preamble delivery. */
 export const BOT_HELD_BACK_AGENTS = [] as const
@@ -213,6 +214,9 @@ export const BotSchema = z.object({
   /** Whether a new Slack thread the owner starts posts the owner's Orca messages back to it; absent is on.
    *  Threads others start, and the owner's teammates' DMs, start off whatever this says. */
   slackMirror: z.boolean().optional().catch(undefined),
+  /** The check a Slack message or automation event passes before it wakes the bot; null or absent is
+   *  none (an update's null removes it). */
+  slackGate: BotSlackGateSchema.nullable().optional().catch(undefined),
   /** The bot may use the Google accounts signed in on its host, for its owner's own requests. Absent is off. */
   google: z.boolean().optional(),
   /** The accounts it may use while `google` is on; absent is every account, now and later. A malformed

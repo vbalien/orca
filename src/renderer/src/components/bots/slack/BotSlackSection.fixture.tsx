@@ -9,6 +9,9 @@ import { clickWhenShown, Panel, settle, slackOnly, stub } from '../bot-connector
 import { BotSlackSetupDialog } from './BotSlackSetupDialog'
 import portrait from '../../../component-fixtures/assets/slack-avatar.jpg'
 import { connectorAvatarSrc } from '../../../../../shared/connector-avatar-scheme'
+import { i18n, loadRendererUiLanguage } from '@/i18n/i18n'
+import type { UiLanguage } from '../../../../../shared/i18n/ui-language'
+import { botConnectorRowKey, openBotConnectorPage } from '../bot-connector-page'
 
 // The Slack photo's address; the host's avatar cache is played by a bundled portrait wherever its
 // cached src is drawn, so the shot never waits on the network.
@@ -61,30 +64,37 @@ function host(bot: Bot, options: { requests?: boolean; photo?: boolean } = {}): 
   })
   const call = window.api.runtime.call
   window.api.runtime.call = async (args) =>
-    args.method === 'bots.access.list'
+    args.method === 'bots.slackGate.status'
       ? {
-          id: 'access-list',
+          id: 'slack-gate-status',
           ok: true,
           _meta: { runtimeId: 'fixture' },
-          result: {
-            ok: true,
-            value: options.requests
-              ? [
-                  {
-                    requestId: 'r1',
-                    botId: bot.id,
-                    source: 'slack',
-                    workspaceId: 'T1',
-                    workspaceName: 'Globex',
-                    requester: { id: 'U-dana', name: 'Dana Kim', handle: 'dana', detail: '' },
-                    createdAt: Date.now() - 4 * 60_000,
-                    expiresAt: Date.now() + 86_400_000
-                  }
-                ]
-              : []
-          }
+          result: { apiKeySet: false, sealing: 'os-keychain' }
         }
-      : call(args)
+      : args.method === 'bots.access.list'
+        ? {
+            id: 'access-list',
+            ok: true,
+            _meta: { runtimeId: 'fixture' },
+            result: {
+              ok: true,
+              value: options.requests
+                ? [
+                    {
+                      requestId: 'r1',
+                      botId: bot.id,
+                      source: 'slack',
+                      workspaceId: 'T1',
+                      workspaceName: 'Globex',
+                      requester: { id: 'U-dana', name: 'Dana Kim', handle: 'dana', detail: '' },
+                      createdAt: Date.now() - 4 * 60_000,
+                      expiresAt: Date.now() + 86_400_000
+                    }
+                  ]
+                : []
+            }
+          }
+        : call(args)
   void refreshAccessRequests()
 }
 
@@ -135,6 +145,35 @@ export const panel280OnePerson = panel(280, shared)
 export const panel280Request = panel(280, builder, undefined, true)
 export const panel280Picker = panel(280, builder, openPicker)
 export const panel280Approval = panel(280, builder, pickComputer)
+
+// The Slack connector's own page with its wake gate, at both panel widths and in Korean.
+const gated: Bot = {
+  ...builder,
+  slackGate: {
+    on: true,
+    kind: 'jev',
+    appliesTo: ['thread_reply', 'trigger'],
+    timeoutSeconds: 10,
+    onError: 'wake',
+    jev: { question: 'Is this message a request this bot should answer?', threshold: 0.6 }
+  }
+}
+const gatePage = (width: number, language: UiLanguage = 'en') =>
+  defineFixture({
+    width: width + 40,
+    setup: () => host(gated),
+    render: () => <Panel bot={gated} width={width} />,
+    interact: async () => {
+      // Fixture pages share one i18n instance; each sets the one it shows.
+      await i18n.changeLanguage(await loadRendererUiLanguage(language))
+      openBotConnectorPage(botConnectorRowKey(gated, 'slack:T1'))
+      await settle(500)
+    }
+  })
+export const gatePage350 = gatePage(350)
+export const gatePage280 = gatePage(280)
+export const gatePage350Korean = gatePage(350, 'ko')
+export const gatePage280Korean = gatePage(280, 'ko')
 
 const dialog = (interact?: () => Promise<void>, photo = true) =>
   defineFixture({
