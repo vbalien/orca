@@ -106,6 +106,8 @@ export type UpdateStatus = (
       delayedUpdate?: DelayedUpdate
       /** Optional so older paired clients keep rendering "up to date". */
       unsupportedSystemUpdate?: UnsupportedSystemUpdate
+      /** A vbalien/orca fork build: self-update is off (new versions come from the fork's releases). */
+      forkUpdatesOff?: true
     }
   | { state: 'downloading'; percent: number; version: string; activeNudgeId?: string }
   | {

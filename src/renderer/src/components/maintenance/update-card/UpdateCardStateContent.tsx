@@ -67,13 +67,18 @@ export function UpdateCardStateContent({
       <UpdateCheckFeedback
         icon="check"
         text={
-          unsupported
+          status.forkUpdatesOff
             ? t(
-                'macosUpdateRequirement.settingsStatus',
-                'Orca {{version}} requires macOS {{macos}} or later. This is the latest version for this Mac.',
-                { version: unsupported.version, macos: unsupported.minimumMacosVersion }
+                'forkBuild.updatesOff',
+                'Self-update is off in this fork build. Get new versions from github.com/vbalien/orca/releases.'
               )
-            : t('auto.components.UpdateCard.ea2a41adbe', "You're on the latest version.")
+            : unsupported
+              ? t(
+                  'macosUpdateRequirement.settingsStatus',
+                  'Orca {{version}} requires macOS {{macos}} or later. This is the latest version for this Mac.',
+                  { version: unsupported.version, macos: unsupported.minimumMacosVersion }
+                )
+              : t('auto.components.UpdateCard.ea2a41adbe', "You're on the latest version.")
         }
       />
     )

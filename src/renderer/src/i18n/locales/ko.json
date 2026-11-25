@@ -28762,5 +28762,9 @@
     "moveLeft": "왼쪽으로 이동",
     "moveRight": "오른쪽으로 이동",
     "reset": "탭 순서 초기화"
+  },
+  "forkBuild": {
+    "updatesOff": "이 포크 빌드는 자체 업데이트가 꺼져 있습니다. 새 버전은 github.com/vbalien/orca/releases에서 받으세요.",
+    "releasesLink": "포크 릴리즈"
   }
 }

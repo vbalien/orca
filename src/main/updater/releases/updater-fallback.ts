@@ -41,6 +41,7 @@ export function statusesEqual(left: UpdateStatus, right: UpdateStatus): boolean 
       return (
         right.state === 'not-available' &&
         left.userInitiated === right.userInitiated &&
+        left.forkUpdatesOff === right.forkUpdatesOff &&
         left.delayedUpdate?.version === right.delayedUpdate?.version &&
         left.delayedUpdate?.availableAt === right.delayedUpdate?.availableAt &&
         left.delayedUpdate?.releasedAt === right.delayedUpdate?.releasedAt &&

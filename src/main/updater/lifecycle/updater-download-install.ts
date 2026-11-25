@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { updaterActive } from '../fork-updates'
 import {
   beginMacUpdateDownload,
   deferMacQuitUntilInstallerReady,
@@ -171,7 +171,7 @@ export abstract class UpdaterDownloadInstall extends UpdaterRequiredRestart {
 
   private canDownloadAutomatically(version: string): boolean {
     return (
-      app.isPackaged &&
+      updaterActive() &&
       this.getAutomaticUpdates?.() === true &&
       this.implicitInstallOnQuit &&
       this.automaticDownloadOfferVersion === version &&

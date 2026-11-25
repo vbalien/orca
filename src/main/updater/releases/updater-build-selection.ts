@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { forkUpdatesOffField, updaterActive } from '../fork-updates'
 import {
   getVersionChannel,
   hasDedicatedReleaseRepo,
@@ -90,8 +91,8 @@ export abstract class UpdaterBuildSelection extends UpdaterMenuChecks {
 
   /** Pin any published channel/tag, including deliberate downgrades. */
   protected async checkForPinnedBuild(channel: ReleaseChannel, tag: string): Promise<void> {
-    if (!app.isPackaged) {
-      this.sendStatus({ state: 'not-available', userInitiated: true })
+    if (!updaterActive()) {
+      this.sendStatus({ state: 'not-available', userInitiated: true, ...forkUpdatesOffField() })
       return
     }
     // Enforce platform artifact availability in main; renderer-disabled options do not protect IPC.
