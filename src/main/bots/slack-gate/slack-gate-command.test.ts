@@ -20,10 +20,22 @@ const alive = (pid: number) => {
   } catch {
     return false
   }
-  const state =
-    process.platform === 'linux'
-      ? (readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(1)?.charAt(0) ?? '')
-      : execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+  let state: string
+  try {
+    state =
+      process.platform === 'linux'
+        ? (readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(1)?.charAt(0) ?? '')
+        : execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+  } catch (error) {
+    // Reaped between the two reads: gone. Any other probe failure fails the test.
+    const reaped =
+      error instanceof Error &&
+      (('code' in error && error.code === 'ENOENT') || ('status' in error && error.status === 1))
+    if (reaped) {
+      return false
+    }
+    throw error
+  }
   return !state.startsWith('Z')
 }
 
