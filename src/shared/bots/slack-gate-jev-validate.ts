@@ -124,6 +124,10 @@ function validateExtraValue(issues: Issues, root: unknown, rootPath: SlackGateJe
       ? value.map((entry, index) => [index, entry])
       : Object.entries(value)
     for (const [key, child] of entries) {
+      // TypeSafe replaces asset placeholders anywhere; Slack gates send none.
+      if (key === 'assets') {
+        issues.add([...path, key], 'assets_unsupported')
+      }
       stack.push({ value: child, path: [...path, key], depth: depth + 1 })
     }
   }
@@ -183,7 +187,7 @@ export function validateSlackGateJev(value: unknown): SlackGateJevValidation {
     if (names.length < 1 || names.length > MAX_QUESTIONS) {
       issues.add(['questions'], 'count', { min: 1, max: MAX_QUESTIONS })
     }
-    for (const name of names) {
+    for (const name of names.slice(0, MAX_QUESTIONS)) {
       questions.set(name, validateQuestion(issues, name, value.questions[name]))
     }
   }
@@ -209,7 +213,7 @@ export function validateSlackGateJev(value: unknown): SlackGateJevValidation {
     if (value.rules.length < 1 || value.rules.length > MAX_RULES) {
       issues.add(['rules'], 'count', { min: 1, max: MAX_RULES })
     }
-    value.rules.forEach((rule, index) => {
+    value.rules.slice(0, MAX_RULES).forEach((rule, index) => {
       const name = validateRule(issues, rule, index, questions)
       if (name) {
         used.add(name)

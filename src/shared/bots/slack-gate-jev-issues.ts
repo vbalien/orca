@@ -5,10 +5,15 @@ import type {
   SlackGateJevPath
 } from './slack-gate-jev-config'
 
+// Enough to fix a config by; a pasted wall of junk never costs more than this many.
+const MAX_ISSUES = 50
+
 export class Issues {
   readonly list: SlackGateJevIssue[] = []
   add(path: SlackGateJevPath, code: SlackGateJevIssueCode, params?: SlackGateJevIssue['params']) {
-    this.list.push({ path, code, ...(params ? { params } : {}) })
+    if (this.list.length < MAX_ISSUES) {
+      this.list.push({ path, code, ...(params ? { params } : {}) })
+    }
   }
 }
 

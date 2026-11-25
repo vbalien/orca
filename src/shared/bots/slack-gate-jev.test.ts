@@ -111,6 +111,14 @@ describe('validateSlackGateJev', () => {
       'send.earlierMessages:out_of_range'
     ])
     expect(codes({ ...base, extra: { message: 'x' } })).toEqual(['extra.message:extra_collision'])
+    expect(codes({ ...base, extra: { nested: { assets: {} }, list: [{ assets: 1 }] } })).toEqual([
+      'extra.list.0.assets:assets_unsupported',
+      'extra.nested.assets:assets_unsupported'
+    ])
+    // A pasted wall of junk is reported briefly, not entry by entry.
+    expect(
+      codes({ ...base, rules: Array.from({ length: 5000 }, () => null) }).length
+    ).toBeLessThanOrEqual(50)
     expect(codes({ ...base, combine: 'most' })).toEqual(['combine:enum'])
   })
 

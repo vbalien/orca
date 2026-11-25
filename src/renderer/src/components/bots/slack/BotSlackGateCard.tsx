@@ -1,6 +1,6 @@
 // "Check before waking": the bot's Slack wake gate, a command or TypeSafe Jev that decides whether a
 // Slack message or automation event wakes the bot. A section of its own in the Slack connector page.
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -130,7 +130,8 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   }, [bot])
 
   const set = (patch: Partial<Draft>) => setDraft((before) => ({ ...before, ...patch }))
-  const gate = gateOf(draft)
+  // Parsed once per edit; the editor parses the same text for its messages.
+  const gate = useMemo(() => gateOf(draft), [draft])
   const failed = (error: unknown) =>
     toast.error(
       error instanceof SlackGateHostTooOldError
