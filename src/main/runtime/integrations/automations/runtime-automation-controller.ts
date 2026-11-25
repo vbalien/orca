@@ -1,5 +1,8 @@
 import { hostQualifiedRepoSelector } from '../../workspaces/catalog/runtime-repo-selector'
-import { refuseLocalSlackTriggers } from '../../../slack-local/slack-local-trigger-policy'
+import {
+  refuseLocalSlackTriggers,
+  refuseLocalSlackTriggersOnUpdate
+} from '../../../slack-local/slack-local-trigger-policy'
 import { parseExecutionHostId } from '../../../../shared/execution-host/execution-host'
 import type { AutomationService } from '../../../automations/automation-service'
 import type {
@@ -223,10 +226,10 @@ export class RuntimeAutomationController {
     assertThreadReplies(this.takesThreadReplies, updates.bot, current)
     if (current.bot) {
       await patchBotAutomationUpdate(this, store, { ...current, bot: current.bot }, updates, patch)
-      const botId = current.bot.botId
-      refuseLocalSlackTriggers(
-        store.getBots?.().find((entry) => entry.id === botId),
-        patch.enabled === false ? undefined : (patch.on ?? (patch.enabled ? current.on : undefined))
+      refuseLocalSlackTriggersOnUpdate(
+        store.getBots?.() ?? [],
+        { botId: current.bot.botId, enabled: current.enabled, on: current.on },
+        { botId: patch.bot?.botId, enabled: patch.enabled, on: patch.on }
       )
     }
     let resolvedRepo: Repo | undefined

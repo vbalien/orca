@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { Bot } from '../../shared/bot-types'
 import { applyBotUpdates, type BotHostUpdates } from '../../shared/rpc-contract/bots-params'
 import type { SecretStore } from '../../shared/secure-storage/secret-store'
+import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import { refuseLocalSlackMemberAdds } from './slack-local-members'
 import { SlackLocalService, type SlackLocalServiceDeps } from './slack-local-service'
 import { SlackLocalTokenStore } from './slack-local-token-store'
@@ -119,7 +120,7 @@ function harness(
     })
   } as unknown as SlackLocalServiceDeps
   const service = new SlackLocalService(deps)
-  return { service, tokens, records, runtime, posts }
+  return { service, tokens, records, runtime, posts, failNextUpdate: () => (failing = true) }
 }
 
 const local = (record: Bot | undefined) =>
@@ -260,6 +261,18 @@ it('refuses a pair of tokens from two different apps before replacing anything',
   expect(local(h.records.get('b1'))?.teamId).toBeUndefined()
 })
 
+const answered = (turnId: number): ConversationEvent => ({
+  kind: 'turn-ended',
+  conversation: { source: 'slack-local', externalId: 'T1:C1:1800000000.000100:U0BOT1' },
+  worktreeId: 'wt',
+  paneKey: 'p',
+  turnId,
+  stopReason: 'success',
+  at: turnId,
+  origin: 'delivery',
+  lastAssistantMessage: 'done'
+})
+
 it('keeps an answer waiting out a rate limit through a token change of the same app', async () => {
   const h = harness([bot('b1')], false, undefined, [
     new Response('', { status: 429, headers: { 'retry-after': '1' } })
@@ -269,17 +282,7 @@ it('keeps an answer waiting out a rate limit through a token change of the same 
     botToken: 'xoxb-team-one-aaaaaaaaaa',
     appToken: APP_TOKEN
   })
-  h.service.deliver('b1', {
-    kind: 'turn-ended',
-    conversation: { source: 'slack-local', externalId: 'T1:C1:1800000000.000100:U0BOT1' },
-    worktreeId: 'wt',
-    paneKey: 'p',
-    turnId: 1,
-    stopReason: 'success',
-    at: 1,
-    origin: 'delivery',
-    lastAssistantMessage: 'done'
-  })
+  h.service.deliver('b1', answered(1))
   await vi.waitFor(() => expect(h.posts).toHaveLength(1))
   // Reissued while the answer waits: it goes on with the new token, once.
   await h.service.config.setTokens('b1', { botToken: 'xoxb-team-one-rotated-dd' })
@@ -289,5 +292,22 @@ it('keeps an answer waiting out a rate limit through a token change of the same 
     { token: 'xoxb-team-one-rotated-dd', text: 'done' }
   ])
   expect(await h.service.status('b1')).not.toHaveProperty('lastReplyError')
+  h.service.stop()
+})
+
+it('keeps listening and answering when switching back to Orca Cloud fails to save', async () => {
+  const h = harness([bot('b1')])
+  await h.service.config.useLocal('b1')
+  await h.service.config.setTokens('b1', {
+    botToken: 'xoxb-team-one-aaaaaaaaaa',
+    appToken: APP_TOKEN
+  })
+  h.failNextUpdate()
+  await expect(h.service.config.useOrca('b1', false)).rejects.toThrow('disk full')
+  expect(local(h.records.get('b1'))?.teamId).toBe('T1')
+  h.service.deliver('b1', answered(2))
+  await vi.waitFor(() =>
+    expect(h.posts).toEqual([{ token: 'xoxb-team-one-aaaaaaaaaa', text: 'done' }])
+  )
   h.service.stop()
 })

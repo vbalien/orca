@@ -28447,14 +28447,14 @@
       "name": "Slack (내 앱)",
       "tokens": {
         "saved": "저장했습니다. Slack에 연결하는 중…",
-        "noKeyring": "이 컴퓨터에는 토큰을 봉인할 OS 키링이 없어 저장할 수 없습니다: {{reason}}",
         "bot": "Bot User OAuth Token",
         "savedPlaceholder": "저장됨 — 바꾸려면 붙여 넣기",
         "app": "App-Level Token",
         "save": "토큰 저장",
         "title": "토큰",
         "botPlaceholder": "xoxb-…",
-        "appPlaceholder": "xapp-…"
+        "appPlaceholder": "xapp-…",
+        "noKeyringNotSaved": "이 컴퓨터에는 Slack 토큰을 봉인할 OS 키링이 없어 여기에 저장할 수 없습니다. 아무것도 저장하지 않았습니다."
       },
       "owner": {
         "label": "내 Slack 멤버 ID",

@@ -1,7 +1,11 @@
 /** connector.* conversation handlers act on this host's seam, regardless of caller. */
 
 import { isLocalSlackConversation } from '../../../../../shared/connectors/local-slack-conversation'
-import { LOCAL_SLACK_ACTION_REFUSAL } from '../../../../slack-local/slack-local-action-policy'
+import { usesLocalSlack } from '../../../../../shared/bots/bot-slack-connection'
+import {
+  LOCAL_SLACK_ACTION_REFUSAL,
+  localSlackActionRefusal
+} from '../../../../slack-local/slack-local-action-policy'
 import {
   cloudConversation,
   CONNECTOR_REPLIES_OUTBOX_FEATURE
@@ -57,6 +61,19 @@ export const CONNECTOR_METHODS = [
       const conversation = cloudConversation(target.key)
       if (!conversation) {
         throw new Error('not_a_cloud_conversation')
+      }
+      // A bot on its own Slack app replies through the cloud only in Linear or GitHub, as with act.
+      const speaker = context.runtime.bots.list().find((bot) => bot.id === target.bot?.botId)
+      const localRefusal = localSlackActionRefusal({
+        botUsesLocalSlack: speaker !== undefined && usesLocalSlack(speaker),
+        linked: null,
+        cloudTarget: conversation,
+        verb: 'reply',
+        ref: undefined,
+        args: {}
+      })
+      if (localRefusal) {
+        throw new Error(localRefusal)
       }
       if (target.turnId === null) {
         throw new Error('no_current_turn')

@@ -92,11 +92,12 @@ export class SlackLocalConfig {
 
   async useOrca(botId: string, forgetTokens: boolean): Promise<void> {
     this.requireBot(botId)
-    this.deps.host.release(botId)
+    // Let go only once saved: a failed switch keeps the bot listening, with its waiting answers.
     await this.deps.runtime.bots.update(botId, (current) => ({
       slackConnection: { mode: 'orca' },
       members: current.members.filter((member) => member.source !== LOCAL_SLACK_SOURCE)
     }))
+    this.deps.host.release(botId)
     if (forgetTokens) {
       await this.deps.tokens.remove(botId)
     }

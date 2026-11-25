@@ -60,9 +60,8 @@ function TokenFields({ local }: { local: SlackLocal }): React.JSX.Element {
       {sealing && !sealing.ok ? (
         <p className="text-xs text-destructive">
           {t(
-            'bots.slackLocal.tokens.noKeyring',
-            "This computer can't seal tokens with an OS keyring, so they can't be saved: {{reason}}",
-            { reason: sealing.reason }
+            'bots.slackLocal.tokens.noKeyringNotSaved',
+            "This computer has no OS keyring to seal Slack tokens with, so they can't be saved here. Nothing was saved."
           )}
         </p>
       ) : null}
