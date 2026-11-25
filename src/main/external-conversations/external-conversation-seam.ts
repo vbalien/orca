@@ -12,7 +12,7 @@ import {
 } from './external-conversation-chat'
 import { answerConversation } from './external-conversation-answer'
 import { chatPromptFacts } from './external-conversation-chat-prompts'
-import { botChatFor } from './external-conversation-bots'
+import { admittedChat, admittedLink, botChatFor } from './external-conversation-bots'
 import {
   ChatDeliveries,
   linkedChat,
@@ -207,7 +207,7 @@ export class ExternalConversationSeam {
           if (!isBotAgent(agent)) {
             return refused('unsupported_agent')
           }
-          const chat = await botChatFor(this.deps.store, host.bots, key, target)
+          const chat = await admittedChat(this.deps.store, host, key, target, signal)
           return 'outcome' in chat
             ? chat
             : this.deliverToChat(host, key, chat, { ...message, text: prompt, deliveryId }, signal)
@@ -229,9 +229,9 @@ export class ExternalConversationSeam {
         this.linked.set(id, { key, worktreeId: queued.workspace.worktreeId })
       }
       return this.chain.enqueue(id, async (signal) => {
-        const linked = findLink(this.deps.store, key)
-        if (!linked) {
-          throw new Error('external_conversation_not_found')
+        const linked = await admittedLink(this.deps.store, host, key, signal)
+        if ('outcome' in linked) {
+          return linked
         }
         const delivered = await this.deliver(host, key, linked, { ...message, deliveryId }, signal)
         return this.goneChats.settle(key, delivered)

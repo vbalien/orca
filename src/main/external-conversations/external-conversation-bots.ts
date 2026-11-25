@@ -5,7 +5,12 @@ import type {
   ExternalConversationLink
 } from '../../shared/connectors/external-conversation-link'
 import { linkedChat, type LinkableChat } from './external-conversation-chat-delivery'
-import { findLink, type ExternalConversationLinkStore } from './external-conversation-links'
+import {
+  findLink,
+  type ExternalConversationLinkStore,
+  type LinkedConversation
+} from './external-conversation-links'
+import type { ExternalConversationHost } from './external-conversation-host'
 import type { Bot } from '../../shared/bot-types'
 import { folderWorkspaceKey } from '../../shared/workspace/identity/workspace-scope'
 import {
@@ -47,6 +52,38 @@ export async function botChatFor(
     return linkedChat(linked.workspace.worktreeId, linked.link)
   }
   return { ...(await bots.open(bot)), bot }
+}
+
+/** A start's chat once the host's admission lets it through; the admission's outcome otherwise. */
+export async function admittedChat(
+  store: ExternalConversationLinkStore,
+  host: ExternalConversationHost,
+  key: ConversationKey,
+  bot: ExternalConversationBot,
+  signal: AbortSignal
+): Promise<LinkableChat | Delivery> {
+  return (
+    (await host.admit?.(signal, { botId: bot.botId })) ??
+    (await botChatFor(store, host.bots, key, bot))
+  )
+}
+
+/** A send's link once the host's admission lets it through (read again after it waited); the
+ *  admission's outcome otherwise. Throws for a conversation with no link. */
+export async function admittedLink(
+  store: ExternalConversationLinkStore,
+  host: ExternalConversationHost,
+  key: ConversationKey,
+  signal: AbortSignal
+): Promise<LinkedConversation | Delivery> {
+  const before = findLink(store, key)
+  const bot = before?.link.bot
+  const held = await host.admit?.(signal, before ? (bot ? { botId: bot.botId } : {}) : null)
+  const linked = held ?? (host.admit ? findLink(store, key) : before)
+  if (!linked) {
+    throw new Error('external_conversation_not_found')
+  }
+  return linked
 }
 
 /**

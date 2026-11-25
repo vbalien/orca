@@ -27828,6 +27828,43 @@
         "otherDevice": "Approve on another device",
         "linkLabel": "Slack approval link",
         "copied": "Copied"
+      },
+      "gate": {
+        "title": "Check before waking",
+        "intro": "Run a check first; the bot wakes only when the check lets the message through.",
+        "on": "Check messages",
+        "kind": "Check with",
+        "kindJev": "TypeSafe Jev",
+        "kindCommand": "A command on this computer",
+        "windows": "Command checks are not available on Windows yet.",
+        "appliesTo": "Check",
+        "command": "Command",
+        "commandHelp": "Gets the message as JSON on stdin. Exit 0 wakes the bot, exit 1 does not.",
+        "question": "Question for Jev",
+        "questionPlaceholder": "Is this message a request this bot should answer?",
+        "threshold": "Wake at or above",
+        "model": "Model",
+        "typesafeNotice": "Slack message text is sent to TypeSafe.",
+        "key": "API key",
+        "keySaved": "Saved",
+        "keyMissing": "Not saved",
+        "keyUnsealed": "Saving a key needs the system keychain, which this computer does not offer Orca.",
+        "keySave": "Save key",
+        "keyRemove": "Remove",
+        "timeout": "Time limit (seconds)",
+        "onError": "If the check fails",
+        "onErrorWake": "Wake the bot",
+        "onErrorBlock": "Stay asleep",
+        "save": "Save",
+        "saved": "Gate saved.",
+        "saveFailed": "Could not save the gate.",
+        "remove": "Remove check",
+        "case": {
+          "mention": "Mentions",
+          "dm": "Direct messages",
+          "threadReply": "Replies in its threads",
+          "trigger": "Automation events"
+        }
       }
     },
     "whoCanAsk": {

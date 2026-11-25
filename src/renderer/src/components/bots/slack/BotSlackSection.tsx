@@ -9,6 +9,7 @@ import { BotWhoCanAskInsetList } from '../BotWhoCanAskInsetList'
 import { useBotConnectorPaged } from '../bot-connector-page'
 import { BotConnectorSection } from '../bot-connector-people'
 import { BotSlackPostAs } from './BotSlackPostAs'
+import { BotSlackGateCard } from './BotSlackGateCard'
 import { useSlackWhoCanAsk } from './use-slack-who-can-ask'
 
 export function BotSlackSection({
@@ -50,6 +51,8 @@ export function BotSlackSection({
           className={paged ? undefined : 'mt-3 px-3'}
         />
       </BotConnectorSection>
+      {/* Not in the after-install dialog: the gate is set up afterwards, on the connector itself. */}
+      {setupState === undefined ? <BotSlackGateCard bot={bot} /> : null}
     </div>
   )
 }

@@ -90,7 +90,9 @@ export function createAutomationRun(
   trigger: AutomationRunTrigger = 'scheduled',
   event?: AutomationRunEvent,
   // Chosen ahead when something must name the run before it exists.
-  id: string = randomUUID()
+  id: string = randomUUID(),
+  // A run settled at birth (a wake gate's skip), written in the same flush as its creation.
+  settled?: Pick<AutomationRun, 'status' | 'error' | 'precheckResult'>
 ): AutomationRun {
   // An event run is keyed by its source event; others by their occurrence.
   const existing = (operations.state.automationRuns ?? []).find(
@@ -132,6 +134,7 @@ export function createAutomationRun(
     startedAt: null,
     dispatchedAt: null,
     createdAt: now,
+    ...settled,
     ...(event ? { event } : {}),
     // Every event run names its source, even with no actor: a bot request it sends is marked as started by it.
     ...(event

@@ -81,10 +81,16 @@ export async function runScheduledOccurrence(
  * created sees the run before it is launched.
  */
 export type EventStartGate = {
-  reserve(
-    automation: Automation
-  ): Promise<{ retryAt: number } | { refused: true } | { event: AutomationRunEvent; runId: string }>
+  reserve(automation: Automation): Promise<
+    | { retryAt: number }
+    | { refused: true }
+    | { event: AutomationRunEvent; runId: string }
+    // A wake gate blocked it: one run born skipped, so a resend starts nothing.
+    | { skipped: Pick<AutomationRun, 'error' | 'precheckResult'> }
+  >
   created(run: AutomationRun): void
+  /** The event's delivery ran out of time: checked before anything is written. */
+  expired?(): boolean
 }
 
 /** The event was a message the bot answered: its turn, in this chat, ran it instead of a run of its own. */
@@ -123,7 +129,11 @@ async function admitEvent(
 ): Promise<EventAdmission | null> {
   const automation = takingAutomation(ctx.store, automationId, event)
   // A wait whose run started, on an event or its deadline, takes nothing more.
-  if (!automation || (automation.once && onceClaimed(ctx.store.listAutomationRuns(automationId)))) {
+  if (
+    !automation ||
+    (automation.once && onceClaimed(ctx.store.listAutomationRuns(automationId))) ||
+    gate?.expired?.()
+  ) {
     return null
   }
   const seen = eventRun(ctx.store, automationId, event)
@@ -138,6 +148,9 @@ async function admitEvent(
   }
   const target = ctx.resolveTarget(automation)
   const refusal = await ctx.describeRefusal(target)
+  if (gate?.expired?.()) {
+    return null
+  }
   const repeated = refusal
     ? await ctx.runs.repeatSkip(automationId, refusal.error, scheduledFor, event)
     : null
@@ -145,6 +158,15 @@ async function admitEvent(
     return { run: repeated }
   }
   const reserved = refusal || !gate ? null : await gate.reserve(automation)
+  if (reserved && 'skipped' in reserved) {
+    // Blocked before any agent saw it: the run keeps the event's key and place, not its words.
+    const { text: _text, ...unread } = event
+    const run = await ctx.runs.createRun(automation, scheduledFor, 'event', unread, undefined, {
+      status: 'skipped_precheck',
+      ...reserved.skipped
+    })
+    return { run }
+  }
   if (reserved && !('event' in reserved)) {
     return null
   }
