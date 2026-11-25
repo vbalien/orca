@@ -26,7 +26,9 @@ async function changeOnHost(
 
 export function useBotSlackLocal(bot: Bot) {
   const [status, setStatus] = useState<BotSlackLocalStatus | null>(null)
+  // A failed change stays until the next change; a failed read only until a read succeeds.
   const [error, setError] = useState<string | null>(null)
+  const [readError, setReadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const target = botHostTarget(bot.hostId)
   const live = useRef(true)
@@ -41,10 +43,11 @@ export function useBotSlackLocal(bot: Bot) {
       )
       if (live.current) {
         setStatus(next)
+        setReadError(null)
       }
     } catch (failure) {
       if (live.current) {
-        setError(failure instanceof Error ? failure.message : String(failure))
+        setReadError(failure instanceof Error ? failure.message : String(failure))
       }
     }
   }, [target, bot.id])
@@ -94,7 +97,7 @@ export function useBotSlackLocal(bot: Bot) {
 
   return {
     status,
-    error,
+    error: error ?? readError,
     busy,
     refresh,
     switchToLocal: () => run('bots.slackLocal.useLocal', {}),

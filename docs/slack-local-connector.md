@@ -16,6 +16,8 @@ automation triggers, files, or the Slack mirror of messages typed in Orca. Those
 and are refused clearly until then.
 
 It runs only in the Orca desktop app, and only while that app is open on this computer.
+Like Orca Cloud's own connector, it connects to Slack directly: Orca's proxy setting is not applied
+to it yet.
 
 ## 1. Create the Slack app
 

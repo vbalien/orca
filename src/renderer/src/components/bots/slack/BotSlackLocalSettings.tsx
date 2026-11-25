@@ -15,6 +15,7 @@ import { BotConnectorSection } from '../bot-connector-people'
 import { botErrorMessage } from '../bot-presentation'
 import type { useBotSlackLocal } from './use-bot-slack-local'
 import { BotSlackGateCard } from './BotSlackGateCard'
+import { BotSlackStrayCloudApp } from './BotSlackStrayCloudApp'
 import { slackLocalErrorText } from './slack-local-error-text'
 
 const MEMBER_ID = /^[A-Z0-9]{2,32}$/
@@ -305,6 +306,7 @@ export function BotSlackLocalSettings({
       {local.error ? (
         <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error)}</p>
       ) : null}
+      <BotSlackStrayCloudApp bot={bot} />
       {/* The same "Check before waking" gate as on Orca Cloud's app: it runs after Who can ask. */}
       <BotSlackGateCard bot={bot} />
     </div>

@@ -30800,6 +30800,11 @@
         "appClaimed": "Another bot already uses this Slack app. Each bot needs its own app.",
         "noBot": "This bot no longer exists.",
         "teamChanged": "The bot now uses another Slack workspace. Check the people again and retry."
+      },
+      "strayCloud": {
+        "failed": "Couldn't remove Orca Cloud's Slack app",
+        "note": "Orca Cloud's Slack app is still installed for this bot. While the bot uses your own app, messages to that app aren't answered.",
+        "remove": "Remove Orca Cloud's Slack app"
       }
     }
   },
