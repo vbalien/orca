@@ -26,11 +26,12 @@ import {
   SLACK_GATE_JEV_SEND_KEYS
 } from '../../../../../../shared/bots/slack-gate-jev-config'
 import { slackGateJevRequest } from '../../../../../../shared/bots/slack-gate-jev-request'
-import { parseSlackGateJevText } from '../../../../../../shared/bots/slack-gate-jev-text'
+import {
+  formatSlackGateJevText,
+  parseSlackGateJevText
+} from '../../../../../../shared/bots/slack-gate-jev-text'
 import { slackGateJevExamples, slackGateJevSampleEvent } from './slack-gate-jev-examples'
 import { slackGateJevIssueText } from './slack-gate-jev-issue-text'
-
-export const formatSlackGateJevText = (value: unknown): string => JSON.stringify(value, null, 2)
 
 function Disclosure(props: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (

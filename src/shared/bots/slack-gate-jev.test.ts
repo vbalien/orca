@@ -16,7 +16,7 @@ import {
 } from './slack-gate-jev-config'
 import { validateSlackGateJev, validateStoredSlackGateJev } from './slack-gate-jev-validate'
 import { SLACK_GATE_CONTEXT_MARKER_TEXT, slackGateJevRequest } from './slack-gate-jev-request'
-import { parseSlackGateJevText } from './slack-gate-jev-text'
+import { formatSlackGateJevText, parseSlackGateJevText } from './slack-gate-jev-text'
 
 const base: SlackGateJevConfig = {
   questions: { asks: { type: 'noul', instructions: 'Asks the bot?' } },
@@ -175,6 +175,13 @@ describe('parseSlackGateJevText', () => {
       '{\n  "questions": { "a": { "type": "choice" } },\n  "rules": [ { "question": "a", "wakeIf": { "oneOf": ["x"] } } ]\n}'
     const located = parseSlackGateJevText(missing)
     expect(located.ok ? null : located.issues[0]).toMatchObject({ code: 'required', line: 2 })
+  })
+
+  it('opens every accepted config again as text it accepts', () => {
+    const wide = { ...base, extra: { levels: { values: Array.from({ length: 6000 }, () => 0) } } }
+    expect(validateSlackGateJev(wide).ok).toBe(true)
+    expect(parseSlackGateJevText(formatSlackGateJevText(wide)).ok).toBe(true)
+    expect(formatSlackGateJevText(base)).toBe(JSON.stringify(base, null, 2))
   })
 
   it('refuses comments, trailing commas, duplicate keys and pathological input before parsing', () => {

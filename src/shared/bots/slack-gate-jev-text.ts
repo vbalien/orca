@@ -168,6 +168,15 @@ export function parseSlackGateJevText(text: string): SlackGateJevTextResult {
   }
 }
 
+/** A config as the editor shows it: indented, or compact when indenting would pass the text limit, so
+ *  every config the host accepts opens again as text the editor accepts. */
+export function formatSlackGateJevText(value: unknown): string {
+  const pretty = JSON.stringify(value, null, 2)
+  return new TextEncoder().encode(pretty).length <= SLACK_GATE_JEV_TEXT_MAX_BYTES
+    ? pretty
+    : JSON.stringify(value)
+}
+
 /** `rules[2].wakeIf.atLeast` for a path. */
 export function formatSlackGateJevPath(path: SlackGateJevPath): string {
   return path.reduce<string>(

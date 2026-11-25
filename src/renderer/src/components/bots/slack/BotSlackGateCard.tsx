@@ -27,8 +27,11 @@ import {
   type SlackGateCase
 } from '../../../../../shared/bots/bot-slack-gate'
 import { slackGateJevConfigOf } from '../../../../../shared/bots/slack-gate-jev-config'
-import { parseSlackGateJevText } from '../../../../../shared/bots/slack-gate-jev-text'
-import { BotSlackGateJevEditor, formatSlackGateJevText } from './jev/BotSlackGateJevEditor'
+import {
+  formatSlackGateJevText,
+  parseSlackGateJevText
+} from '../../../../../shared/bots/slack-gate-jev-text'
+import { BotSlackGateJevEditor } from './jev/BotSlackGateJevEditor'
 import { saveSlackGate, SlackGateHostTooOldError } from './jev/slack-gate-save'
 import type { SlackGateKeyStatus } from '../../../../../shared/rpc-contract/bots-slack-gate-params'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
