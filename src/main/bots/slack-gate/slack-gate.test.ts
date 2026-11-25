@@ -113,6 +113,22 @@ describe('SlackGateDecider', () => {
     expect(await expired).toMatchObject({ reason: 'expired' })
   })
 
+  it('lets a verdict that lands after the timeout follow onError, not the verdict', async () => {
+    vi.useFakeTimers()
+    const late = heldRun()
+    const { decider: gate } = decider([late], {
+      runCommand: ({ signal }) => {
+        // A runner that ignores the stop and answers wake inside the stop grace.
+        signal.addEventListener('abort', () => late.settle({ kind: 'exit', code: 0 }))
+        return { outcome: late.outcome, released: late.outcome.then(() => undefined) }
+      }
+    })
+    const bot = { id: 'b', name: 'B', slackGate: command({ timeoutSeconds: 1, onError: 'block' }) }
+    const decided = gate.decide(bot, event())
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(await decided).toMatchObject({ verdict: 'block', reason: 'error', timedOut: true })
+  })
+
   it('reports a Stop as cancelled, never through onError', async () => {
     const stop = new AbortController()
     const bot = { id: 'b', name: 'B', slackGate: command({ onError: 'wake' }) }

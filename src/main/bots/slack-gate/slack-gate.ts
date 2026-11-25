@@ -99,7 +99,8 @@ export class SlackGateDecider {
           durationMs: elapsed()
         })
       }
-      if (outcome.kind === 'verdict') {
+      // A verdict that lands after the timeout is a failed check: the timeout already decided it.
+      if (outcome.kind === 'verdict' && why !== 'timeout') {
         return this.finish(bot, event, {
           verdict: outcome.wake ? 'wake' : 'block',
           reason: outcome.wake ? 'passed' : 'blocked',

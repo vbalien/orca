@@ -105,9 +105,16 @@ describe('a send that waits on its muted thread', () => {
     const wakeGate = vi.fn<NonNullable<DispatchMachine['wakeGate']>>(() => admitted)
     let decide: (step: 'send') => void = () => {}
     const decided = new Promise<'send'>((resolve) => (decide = resolve))
+    // At dispatch the carried automation is left to its trigger gate (null); asked again after the
+    // wait it would ride the turn, as if the gate had been turned off meanwhile.
+    const turnAutomations = vi
+      .fn<NonNullable<DispatchMachine['turnAutomations']>>()
+      .mockReturnValueOnce(null)
+      .mockReturnValue({ note: 'run the automation in this turn', record: async () => {} })
     const machine: DispatchMachine = {
       runTrigger: async () => false,
       wakeGate,
+      turnAutomations,
       threadMute: () => ({ decided })
     }
     const send: Extract<ConnectorDelivery, { kind: 'send' }> = {
@@ -115,7 +122,15 @@ describe('a send that waits on its muted thread', () => {
       deliveryId: 'd1',
       expiresAt: 1_900_000_000_000,
       conversation: { source: 'slack', externalId: 'T1:C1:1800000000.000100:U0BOT' },
-      text: 'hi'
+      text: 'hi',
+      automations: [
+        {
+          automationId: 'slackAuto',
+          triggerId: 'slackAuto-rule',
+          botId: 'slackBot',
+          event: { key: 'k-carried', actorId: 'U1', occurredAt: 1 }
+        }
+      ]
     }
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fake seam never reads its host.
     const host = {} as Parameters<typeof dispatchDelivery>[1]
@@ -126,6 +141,8 @@ describe('a send that waits on its muted thread', () => {
     // Not asked again at redispatch: the admission handed to the seam is the dispatch-time one.
     expect(wakeGate).toHaveBeenCalledTimes(1)
     expect(calls.send.mock.calls[0]?.[0]).toMatchObject({ admit: admitted })
+    expect(turnAutomations).toHaveBeenCalledTimes(1)
+    expect(calls.send.mock.calls[0]?.[3]).not.toHaveProperty('note')
   })
 })
 
