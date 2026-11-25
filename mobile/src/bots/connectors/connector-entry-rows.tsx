@@ -182,6 +182,22 @@ export function connectorRows(input: ConnectorRowsInput): ReactNode[] {
     const title = botConnectorTitleLine(entry.title, separator)
     switch (entry.kind) {
       case 'slack': {
+        // The bot's own Slack app is set up only on its computer: nothing to open here.
+        if (entry.key === 'slack-local') {
+          rows.push(
+            <ListRow
+              key={entry.key}
+              leading={mark('slack')}
+              title={title}
+              subtitle={t(
+                'bots.slackLocal.phoneRow',
+                'Your own Slack app. Set it up in Orca on the computer this bot runs on.'
+              )}
+              subtitleLines={2}
+            />
+          )
+          break
+        }
         const face = entry.teamId
           ? slackRowFace(input.slack, entry.teamId, input.hostName, t)
           : null

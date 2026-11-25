@@ -68,6 +68,8 @@ export type ExternalConversationSeamDeps = {
   /** A delivery was admitted to this chat through the reply outbox. */
   replyAdmitted?: (sessionId: string) => void
   slackMirror?: () => SlackMirror | null
+  /** Whether a bot answers Slack through its own app on this computer, not Orca Cloud's. */
+  usesLocalSlack?: (botId: string) => boolean
   /** A watch began, after its snapshot: turn ends held while none watched (the Slack mirror's
    *  among them) are told now. */
   watched?: () => void

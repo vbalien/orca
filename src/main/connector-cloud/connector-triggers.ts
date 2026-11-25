@@ -14,6 +14,7 @@ import {
 } from '../../shared/automation-event-triggers'
 import { isGoogleTrigger } from '../../shared/automation-google-triggers'
 import { hookIdOfRule, webhookActorId } from '../../shared/connector-webhook-contract'
+import { usesLocalSlack } from '../../shared/bots/bot-slack-connection'
 
 type CloudRule = AutomationConnectorEventTrigger | AutomationWebhookTrigger
 
@@ -39,12 +40,16 @@ export function connectorTriggers(
     Automation,
     'id' | 'enabled' | 'bot' | 'on' | 'missedRunGraceMinutes'
   >[],
-  pausing: (hookId: string) => boolean = () => false
+  pausing: (hookId: string) => boolean = () => false,
+  bots: readonly Pick<Bot, 'id' | 'slackConnection'>[] = []
 ): ConnectorTrigger[] {
+  // A bot on its own Slack app takes no Slack events through the cloud, so its Slack rules stay here.
+  const localSlack = new Set(bots.filter(usesLocalSlack).map((entry) => entry.id))
   return automations.flatMap(({ id, enabled, bot, on, missedRunGraceMinutes }) =>
     bot
       ? (on ?? [])
           .filter((trigger): trigger is CloudRule => !isGoogleTrigger(trigger))
+          .filter((trigger) => trigger.source !== 'slack' || !localSlack.has(bot.botId))
           .filter((trigger) => enabled || pausing(hookIdOfRule(trigger.id) ?? ''))
           .map((trigger) => ({
             ...withoutNames(trigger),
@@ -84,7 +89,7 @@ function fromPeople(
  */
 export function triggerRunEvent(
   automations: readonly Pick<Automation, 'id' | 'bot' | 'on'>[],
-  bots: readonly Pick<Bot, 'id'>[],
+  bots: readonly Pick<Bot, 'id' | 'slackConnection'>[],
   delivery: Pick<TriggerDelivery, 'automationId' | 'triggerId' | 'botId' | 'event'> &
     Partial<Pick<TriggerDelivery, 'conversation' | 'inThread' | 'owner'>>
 ): AutomationRunEvent | null {
@@ -96,8 +101,14 @@ export function triggerRunEvent(
     bot && automation?.bot?.botId === bot.id
       ? automation.on?.find((rule) => rule.id === delivery.triggerId)
       : undefined
-  // The cloud never has a Google rule, so it can't deliver one.
-  if (!trigger || !bot || isGoogleTrigger(trigger)) {
+  // The cloud never has a Google rule, so it can't deliver one; nor a Slack rule of a bot on its
+  // own Slack app, which only a delivery queued before that switch could still carry.
+  if (
+    !trigger ||
+    !bot ||
+    isGoogleTrigger(trigger) ||
+    (trigger.source === 'slack' && usesLocalSlack(bot))
+  ) {
     return null
   }
   const hookId = hookIdOfRule(trigger.id)

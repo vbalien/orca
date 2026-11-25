@@ -1,3 +1,4 @@
+import { BotSlackConnectionSchema } from './bots/bot-slack-connection'
 import * as z from 'zod'
 import { BotImportedFromSchema } from './bots/bot-import'
 import { BotSharedFromSchema } from './bots/bot-shared-from'
@@ -197,6 +198,8 @@ export const BotSchema = z.object({
   slack: BotSlackLinkSchema.nullable(),
   /** Every Slack workspace the bot is in, first one first; absent on bots saved before several. */
   slackApps: z.array(BotSlackLinkSchema).max(BOT_MAX_CONNECTOR_WORKSPACES).optional(),
+  /** Through Orca Cloud's app (absent) or the owner's own app on this computer. Older hosts drop it. */
+  slackConnection: BotSlackConnectionSchema.optional().catch(undefined),
   /** The first of linearWorkspaces, as `slack` is of slackApps. */
   linear: BotLinearLinkSchema.nullable().default(null),
   linearWorkspaces: z.array(BotLinearLinkSchema).max(BOT_MAX_CONNECTOR_WORKSPACES).optional(),
@@ -285,13 +288,6 @@ export function botLinearWorkspaces(
   bot: Pick<Bot, 'linear' | 'linearWorkspaces'>
 ): BotLinearLink[] {
   return bot.linearWorkspaces ?? (bot.linear ? [bot.linear] : [])
-}
-
-/** Whether the cloud can bring the bot work: a Slack app, a Linear workspace or a GitHub link. */
-export function botHasConnector(
-  bot: Pick<Bot, 'slack' | 'slackApps' | 'linear' | 'linearWorkspaces' | 'github'>
-): boolean {
-  return botSlackApps(bot).length > 0 || botLinearWorkspaces(bot).length > 0 || bot.github !== null
 }
 
 /**

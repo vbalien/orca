@@ -60,7 +60,9 @@ export class ChatDeliveries {
       chat: LinkableChat,
       text: string,
       asker?: ConnectorAsker
-    ) => void
+    ) => void,
+    // Its own subscriber id: the completion feed keeps one subscription per id.
+    private readonly unwatchedId = 'external-conversations-unwatched'
   ) {}
 
   /** A watch gap leaves no proof these deliveries still belong to the current turn. */
@@ -86,7 +88,7 @@ export class ChatDeliveries {
           this.origin(news.sessionId, null)
         }
       },
-      'external-conversations-unwatched',
+      this.unwatchedId,
       // Unwatched, a held end isn't taken: the watch that comes back hears that turn's end.
       false
     )
