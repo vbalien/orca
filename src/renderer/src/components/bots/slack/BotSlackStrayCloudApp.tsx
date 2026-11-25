@@ -6,8 +6,12 @@ import { Button } from '@/components/ui/button'
 import { useTranslate } from '@/i18n/use-translate'
 import { refreshBotHost } from '@/lib/bot-catalog'
 import { botSlackCalls } from '@/lib/bot-connector-host-calls'
+import { installWindowVisibilityInterval } from '@/lib/window-activity/window-visibility-interval'
 import type { Bot } from '../../../../../shared/bot-types'
 import type { ConnectorBotSlackState } from '../../../../../shared/connector-bot-slack-contract'
+
+// A hand-off can be redeemed at any time, and sign-in can come later: asked again while shown.
+const RECHECK_MS = 60_000
 
 const gone = (entry: ConnectorBotSlackState): boolean =>
   entry.state === 'not_created' || entry.state === 'grant_expired'
@@ -20,12 +24,14 @@ export function BotSlackStrayCloudApp({ bot }: { bot: Bot }): React.JSX.Element 
   const recorded = Boolean(bot.slack) || (bot.slackApps?.length ?? 0) > 0
   const read = useCallback(async () => {
     const state = await botSlackCalls(bot.hostId).state({ botId: bot.id })
-    setInCloud(
-      state.ok && [state.value, ...(state.value.teams ?? [])].some((entry) => !gone(entry))
-    )
+    // A failed read keeps what was last known.
+    if (state.ok) {
+      setInCloud([state.value, ...(state.value.teams ?? [])].some((entry) => !gone(entry)))
+    }
   }, [bot.hostId, bot.id])
   useEffect(() => {
     void read()
+    return installWindowVisibilityInterval({ run: () => void read(), intervalMs: RECHECK_MS })
   }, [read])
   if (!recorded && !inCloud) {
     return null
