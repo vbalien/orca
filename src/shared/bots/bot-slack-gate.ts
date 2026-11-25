@@ -1,6 +1,8 @@
 // A bot's Slack wake gate: a check that runs before a Slack message (or automation event) wakes the
 // bot. Independent of how Slack reaches Orca, so any Slack connector can ask the same decision.
 import * as z from 'zod'
+import type { StoredSlackGateJev } from './slack-gate-jev-config'
+import { validateStoredSlackGateJev } from './slack-gate-jev-validate'
 
 export const SLACK_GATE_CASES = ['mention', 'dm', 'thread_reply', 'trigger'] as const
 export type SlackGateCase = (typeof SLACK_GATE_CASES)[number]
@@ -21,11 +23,27 @@ const common = {
   onError: z.enum(['wake', 'block'])
 }
 
-export const BotSlackGateJevSchema = z.object({
+/** Today's jev shape exactly as builds before configurable rules read it (they strip unknown keys).
+ *  Frozen: every saved gate must keep parsing with it, or a rollback would drop the gate. */
+export const LegacyBotSlackGateJevSchema = z.object({
   question: nonBlank(2000),
   threshold: z.number().min(0).max(1),
   model: z.string().trim().max(100).optional()
 })
+
+/** A config of TypeSafe questions and rules (with the mirror older builds read), or the legacy
+ *  one-question gate. Checked field by field by the same validator the editor uses. */
+export const BotSlackGateJevSchema = z
+  .custom<StoredSlackGateJev>()
+  .superRefine((value, context) => {
+    for (const issue of validateStoredSlackGateJev(value)) {
+      context.addIssue({
+        code: 'custom',
+        path: issue.path,
+        message: `${issue.code}${issue.params ? ` ${JSON.stringify(issue.params)}` : ''}`
+      })
+    }
+  })
 
 export const BotSlackGateSchema = z.discriminatedUnion('kind', [
   z.object({ ...common, kind: z.literal('command'), command: nonBlank(2000) }),
@@ -55,6 +73,9 @@ export type SlackGateEvent = {
   trigger?: { automationId: string; triggerId: string; event: string }
   /** Texts were cut to fit the gate's input. */
   truncated?: true
+  /** The thread's earlier messages are partly missing or could not be read. Never in command stdin:
+   *  only Jev configs with rules read it. */
+  contextIncomplete?: 'more' | 'unreadable'
 }
 
 function caseApplies(

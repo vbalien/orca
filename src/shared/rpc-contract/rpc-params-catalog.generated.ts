@@ -1386,6 +1386,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'bots.slackGate.set': SlackGateSet,
   'bots.slackGate.setKey': SlackGateSetKey,
   'bots.slackGate.status': SlackGateBot,
+  'bots.slackGate.update': SlackGateSet,
   'bots.slackLocal.addAskers': BotSlackLocalAskers,
   'bots.slackLocal.setOwner': BotSlackLocalOwner,
   'bots.slackLocal.setTokens': BotSlackLocalTokens,
