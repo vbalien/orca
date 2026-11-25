@@ -169,6 +169,9 @@ function sendConnectorTurn(
         if (signal.aborted) {
           throw new Error(refusalOf(signal))
         }
+        if (delivery.admissible?.() === false) {
+          throw new Error('asker_not_allowed')
+        }
         admit()
       }
     }

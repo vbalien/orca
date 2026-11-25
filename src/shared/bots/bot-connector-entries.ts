@@ -1,6 +1,7 @@
 // A bot's connectors as one list: each Slack workspace, Linear workspace and GitHub org it is in,
 // Google, Webhooks, the apps it signed in to through Composio, and the apps it has as tools. The
 // desktop and the phone both list these rows, each from what its own reads say of every service.
+import { localSlackConnection } from './bot-slack-connection'
 import {
   botLinearWorkspaces,
   botMembersFrom,
@@ -102,7 +103,8 @@ export type BotConnectorFacts<Connection extends ComposioSignIn, Tool extends Ap
 type ConnectorBot = Pick<
   Bot,
   'slack' | 'slackApps' | 'linear' | 'linearWorkspaces' | 'members' | 'github' | 'google'
->
+> &
+  Partial<Pick<Bot, 'slackConnection'>>
 
 /** URL servers other than Composio's own, which is drawn as its apps. */
 export function isBotAppTool(tool: AppTool): boolean {
@@ -156,6 +158,15 @@ export function botConnectorEntries<Connection extends ComposioSignIn, Tool exte
         ...(face.updateNeeded ? { updateNeeded: true as const } : {})
       },
       { service: 'Slack', place: face.workspace }
+    )
+  }
+  // The bot's own Slack app on its computer: set up there, so its row needs the owner until it has
+  // a workspace and an owner.
+  const local = localSlackConnection(bot)
+  if (local) {
+    add(
+      { kind: 'slack', key: 'slack-local', needsOwner: !local.teamId || !local.ownerUserId },
+      { service: 'Slack', place: local.teamName ?? null }
     )
   }
   // People added in Slack stay listed even after the app is removed, so they can be removed too.

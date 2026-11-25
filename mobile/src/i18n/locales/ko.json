@@ -5775,6 +5775,9 @@
     },
     "new": {
       "purposeTooLongForHost": "{{host}}의 Orca는 용도를 200자까지만 받을 수 있습니다. 줄이거나 {{host}}의 Orca를 업데이트하세요."
+    },
+    "slackLocal": {
+      "phoneRow": "직접 만든 Slack 앱입니다. 이 봇이 실행되는 컴퓨터의 Orca에서 설정하세요."
     }
   },
   "sidebar": {

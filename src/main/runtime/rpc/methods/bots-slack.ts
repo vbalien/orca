@@ -20,6 +20,8 @@ import { botSlackApps, type Bot, type BotSlackApp } from '../../../../shared/bot
 import { CONNECT_ACCOUNT_CHANGED } from '../../../connector-cloud/connector-connect'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { defineMethod, type RpcContext } from '../core'
+import { usesLocalSlack } from '../../../../shared/bots/bot-slack-connection'
+import { SLACK_USES_LOCAL_APP, withSlackConfigLock } from '../../../slack-local/slack-config-lock'
 
 /** The bot's Slack workspaces after one is set up (added, or its app replaced) or removed. */
 export function nextSlackApps(
@@ -51,10 +53,62 @@ async function recordSlack(
   change: Parameters<typeof nextSlackApps>[1]
 ): Promise<void> {
   try {
-    await runtime.bots.update(botId, (bot) => ({ slackApps: nextSlackApps(bot, change) }))
+    await runtime.bots.update(botId, (bot) =>
+      // Never a cloud app on a bot that answers Slack through its own; removal always goes.
+      'set' in change && usesLocalSlack(bot) ? {} : { slackApps: nextSlackApps(bot, change) }
+    )
   } catch (error) {
     console.error('Failed to record the bot’s Slack app:', error)
   }
+}
+
+function botUsesLocalSlack(runtime: Pick<OrcaRuntimeService, 'bots'>, botId: string): boolean {
+  const bot = runtime.bots.list().find((entry) => entry.id === botId)
+  return bot ? usesLocalSlack(bot) : false
+}
+
+async function setUpSlackApp(context: RpcContext, botId: string, teamId: string) {
+  const { runtime } = context
+  const cloud = runtime.getConnectorCloud()
+  const setUp = async () => {
+    // A set-up answered after the host's account changed belongs to the old account: not recorded.
+    const account = cloud?.signedInAccount() ?? null
+    const result = await withHostCloudClient(context, (client) =>
+      client.setUpSlackApp(botId, teamId)
+    )
+    if (result.ok && (cloud?.signedInAccount() ?? null) !== account) {
+      return { ok: false as const, error: CONNECT_ACCOUNT_CHANGED }
+    }
+    if (result.ok) {
+      await recordSlack(runtime, botId, { set: { appId: result.value.appId, teamId } })
+    }
+    return result
+  }
+  // A bot with no connector yet is known to the cloud only once this host says hello.
+  return cloud ? cloud.withConnection(setUp) : setUp()
+}
+
+// After a hand-off: the app is recorded as the cloud reads it for this host, not as the client says.
+async function adoptSlackApp(
+  context: RpcContext,
+  botId: string,
+  teamId: string
+): Promise<BotSlackResult<undefined>> {
+  if (botUsesLocalSlack(context.runtime, botId)) {
+    return { ok: false as const, error: SLACK_USES_LOCAL_APP }
+  }
+  const state = await withHostCloudClient(context, (client) => client.slackState(botId, teamId))
+  if (!state.ok) {
+    return state
+  }
+  if (
+    (state.value.state !== 'created' && state.value.state !== 'installed') ||
+    state.value.teamId !== teamId
+  ) {
+    return { ok: false as const, error: BOT_SLACK_DESKTOP_ERRORS.failed }
+  }
+  await recordSlack(context.runtime, botId, { set: { appId: state.value.appId, teamId } })
+  return { ok: true as const, value: undefined }
 }
 
 // `accounts-admin`: these hold the host's integration credentials (rpc-method-permission.ts).
@@ -84,26 +138,13 @@ export const BOT_SLACK_METHODS = [
     name: 'bots.slack.setUpApp',
     permission: 'accounts-admin',
     params: BotSlackSetUp,
-    handler: async ({ botId, teamId }, context) => {
-      const { runtime } = context
-      const cloud = runtime.getConnectorCloud()
-      const setUp = async () => {
-        // A set-up answered after the host's account changed belongs to the old account: not recorded.
-        const account = cloud?.signedInAccount() ?? null
-        const result = await withHostCloudClient(context, (client) =>
-          client.setUpSlackApp(botId, teamId)
-        )
-        if (result.ok && (cloud?.signedInAccount() ?? null) !== account) {
-          return { ok: false as const, error: CONNECT_ACCOUNT_CHANGED }
+    handler: async ({ botId, teamId }, context) =>
+      withSlackConfigLock(async () => {
+        if (botUsesLocalSlack(context.runtime, botId)) {
+          return { ok: false as const, error: SLACK_USES_LOCAL_APP }
         }
-        if (result.ok) {
-          await recordSlack(runtime, botId, { set: { appId: result.value.appId, teamId } })
-        }
-        return result
-      }
-      // A bot with no connector yet is known to the cloud only once this host says hello.
-      return cloud ? cloud.withConnection(setUp) : setUp()
-    }
+        return await setUpSlackApp(context, botId, teamId)
+      })
   }),
   // Another signed-in Orca account (a paired desktop's own) creates the app with its grant; the code
   // is spent only by that desktop's own cloud session, never through any runtime's RPC.
@@ -111,46 +152,39 @@ export const BOT_SLACK_METHODS = [
     name: 'bots.slack.handOff',
     permission: 'accounts-admin',
     params: BotSlackSetUp,
-    handler: async ({ botId, teamId }, context) => {
-      const cloud = context.runtime.getConnectorCloud()
-      const handOff = () =>
-        withHostCloudClient(context, (client) => client.handOffSlackApp(botId, teamId))
-      return cloud ? cloud.withConnection(handOff) : handOff()
-    }
+    handler: async ({ botId, teamId }, context) =>
+      withSlackConfigLock(async () => {
+        if (botUsesLocalSlack(context.runtime, botId)) {
+          return { ok: false as const, error: SLACK_USES_LOCAL_APP }
+        }
+        const cloud = context.runtime.getConnectorCloud()
+        const handOff = () =>
+          withHostCloudClient(context, (client) => client.handOffSlackApp(botId, teamId))
+        return await (cloud ? cloud.withConnection(handOff) : handOff())
+      })
   }),
-  // After a hand-off: the app is recorded as the cloud reads it for this host, not as the client says.
   defineMethod({
     name: 'bots.slack.adoptApp',
     permission: 'accounts-admin',
     params: BotSlackSetUp,
-    handler: async ({ botId, teamId }, context) => {
-      const state = await withHostCloudClient(context, (client) => client.slackState(botId, teamId))
-      if (!state.ok) {
-        return state
-      }
-      if (
-        (state.value.state !== 'created' && state.value.state !== 'installed') ||
-        state.value.teamId !== teamId
-      ) {
-        return { ok: false as const, error: BOT_SLACK_DESKTOP_ERRORS.failed }
-      }
-      await recordSlack(context.runtime, botId, { set: { appId: state.value.appId, teamId } })
-      return { ok: true as const, value: undefined }
-    }
+    handler: async ({ botId, teamId }, context) =>
+      withSlackConfigLock(() => adoptSlackApp(context, botId, teamId))
   }),
   defineMethod({
     name: 'bots.slack.remove',
     permission: 'accounts-admin',
     params: BotSlackBot,
-    handler: async ({ botId, teamId }, context) => {
-      const removed = await withHostCloudClient(context, (client) =>
-        client.removeSlackApp(botId, teamId)
-      )
-      if (removed.ok) {
-        await recordSlack(context.runtime, botId, { remove: teamId })
-      }
-      return removed
-    }
+    // Serialized with mode changes, yet allowed on a bot using its own app: a stray cloud app goes.
+    handler: async ({ botId, teamId }, context) =>
+      withSlackConfigLock(async () => {
+        const removed = await withHostCloudClient(context, (client) =>
+          client.removeSlackApp(botId, teamId)
+        )
+        if (removed.ok) {
+          await recordSlack(context.runtime, botId, { remove: teamId })
+        }
+        return removed
+      })
   }),
   // What messages typed at the bot's computer post as in Slack: at once for the after-install pick,
   // else an install link whoever set the bot up approves.
