@@ -1,0 +1,363 @@
+name: Fork Release
+
+# Fork-only (vbalien/orca): pushing a fork-v<X.Y.Z>-<N> tag builds macOS, Linux and Windows installers from
+# that tag's commit and opens a draft release on vbalien/orca. A person publishes the draft after checking it
+# (fork/README.md). No secrets: unsigned builds, GITHUB_TOKEN only. Upstream release workflows stay untouched.
+on:
+  push:
+    tags:
+      - 'fork-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  ORCA_BACKGROUND_LAUNCH: '1'
+  UPSTREAM_URL: https://github.com/stablyai/orca
+
+jobs:
+  resolve:
+    if: github.repository == 'vbalien/orca'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      number: ${{ steps.check.outputs.number }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Check the tag, version and base release
+        id: check
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^fork-v([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$ ]] ||
+            { echo "::error::tag must look like fork-vX.Y.Z-N: $TAG"; exit 1; }
+          version=${BASH_REMATCH[1]}
+          number=${BASH_REMATCH[2]}
+          actual=$(node -p 'require("./package.json").version')
+          [[ "$actual" == "$version" ]] ||
+            { echo "::error::package.json is $actual but the tag says $version"; exit 1; }
+          # The base must be upstream's own release tag, and the nearest release tag below this commit.
+          git fetch --quiet --no-tags --filter=blob:none "$UPSTREAM_URL" '+refs/tags/v*:refs/tags/v*'
+          base=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' HEAD)
+          [[ "$base" == "v$version" ]] ||
+            { echo "::error::nearest release tag is $base, not v$version"; exit 1; }
+          # A v* tag that exists only in this fork must not pass for upstream's release.
+          upstream=$(git ls-remote "$UPSTREAM_URL" "refs/tags/$base" "refs/tags/$base^{}" | sort -k2 | tail -n 1 | cut -f1)
+          [[ -n "$upstream" && "$upstream" == "$(git rev-parse "$base^{commit}")" ]] ||
+            { echo "::error::$base is not upstream's tag (upstream: ${upstream:-none})"; exit 1; }
+          [[ -z "$(git rev-list --merges "$base..HEAD")" ]] ||
+            { echo "::error::the patch stack $base..HEAD has merge commits"; exit 1; }
+          {
+            echo "version=$version"
+            echo "number=$number"
+            echo "sha=$(git rev-parse HEAD)"
+          } >>"$GITHUB_OUTPUT"
+          git log --format='- %s' --reverse "$base..HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  orcad-template:
+    needs: resolve
+    # The upstream reusable workflow reads its own jobs through the Actions API.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/qualified-orcad-template.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      fast_runners: false
+
+  build:
+    needs: [resolve, orcad-template]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            install_args: ''
+            # The release number N becomes the deb/rpm revision (fork-v1.4.275-2 → 1.4.275-2).
+            builder_args: --linux AppImage deb rpm --x64
+            unpacked: dist/linux-unpacked
+            assets: 'dist/orca-linux.AppImage dist/*.deb dist/*.rpm'
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            install_args: ''
+            builder_args: --linux AppImage deb rpm --arm64
+            unpacked: dist/linux-arm64-unpacked
+            assets: 'dist/orca-linux-arm64.AppImage dist/*.deb dist/*.rpm'
+          - os: windows-2022
+            platform: win
+            install_args: ''
+            builder_args: --win
+            unpacked: dist/win-unpacked
+            assets: 'dist/orca-windows-setup.exe'
+          # One native runner per Mac arch: packaging boots the terminal host of the slice it builds, and an x64
+          # slice under Rosetta on a hosted arm64 runner misses that 20 s boot (upstream's faster runners make it).
+          # dmg is named by the config; zip keeps electron-builder's default (Orca-<ver>[-arm64]-mac.zip).
+          - os: macos-15-intel
+            platform: mac-x64
+            install_args: ''
+            builder_args: --mac dmg zip --x64
+            unpacked: dist/mac/Orca.app
+            assets: 'dist/orca-macos-x64.dmg dist/*-mac.zip'
+          - os: macos-15
+            platform: mac-arm64
+            install_args: ''
+            builder_args: --mac dmg zip --arm64
+            unpacked: dist/mac-arm64/Orca.app
+            assets: 'dist/orca-macos-arm64.dmg dist/*-mac.zip'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/setup@v2
+        with:
+          install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          check-latest: true
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            mobile/pnpm-lock.yaml
+
+      - name: Use external node-gyp (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          npm install -g node-gyp@11.5.0
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: pnpm install --frozen-lockfile ${{ matrix.install_args }}
+
+      - uses: ./.github/actions/install-mobile-dependencies
+
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-atspi-2.0 at-spi2-core xclip xdotool rpm
+
+      - name: Ensure the Rust toolchain for the Windows CLI launcher
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          }
+          cargo --version
+
+      # No ORCA_BUILD_IDENTITY or telemetry key: a fork build stays out of upstream telemetry.
+      - name: Build app
+        shell: bash
+        run: pnpm run build:release
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Download the orcad deployment template
+        uses: actions/download-artifact@v8
+        with:
+          name: orcad-template
+          path: out/orcad-template
+
+      - name: Package (unsigned; mac ad-hoc signed)
+        shell: bash
+        env:
+          ORCA_REQUIRE_ORCAD_TEMPLATE: '1'
+          ORCA_LINUX_ARM64_RELEASE: ${{ matrix.platform == 'linux-arm64' && '1' || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          BUILDER_ARGS: ${{ matrix.builder_args }}
+          PLATFORM: ${{ matrix.platform }}
+          RELEASE_NUMBER: ${{ needs.resolve.outputs.number }}
+        run: |
+          set -euo pipefail
+          if [[ "$PLATFORM" == mac-* ]]; then
+            node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON config/scripts/orcad-distribution/prebuilds/pinned-node-downloads.mjs darwin-arm64 darwin-x64
+          fi
+          node config/scripts/native-build/node-addons/ensure-native-runtime.mjs --runtime=electron
+          extra=()
+          # Apple Silicon refuses unsigned code; ad-hoc signing ("-") needs no certificate.
+          [[ "$PLATFORM" == mac-* ]] && extra+=(-c.mac.identity=-)
+          # The embedded app-update.yml points at this fork; fork builds never self-update anyway.
+          # shellcheck disable=SC2086
+          # Linux packages carry the fork release number as their revision, so a re-release upgrades.
+          [[ "$PLATFORM" == linux-* ]] && extra+=("-c.buildNumber=$RELEASE_NUMBER")
+          pnpm exec electron-builder --config config/electron-builder.config.cjs $BUILDER_ARGS \
+            --publish never -c.publish.owner=vbalien "${extra[@]}"
+
+      - name: Load packaged node-pty on the Linux floor
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: node config/scripts/desktop-distribution/runtime-verification/run-linux-packaged-node-pty-floor-smoke.mjs --app-dir ${{ matrix.unpacked }}
+
+      - name: Check the packaged CLI and signature
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          UNPACKED: ${{ matrix.unpacked }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          case "$PLATFORM" in
+            linux-*) exe="$UNPACKED/orca-ide"; resources="$UNPACKED/resources" ;;
+            win) exe="$UNPACKED/Orca.exe"; resources="$UNPACKED/resources" ;;
+            mac-*)
+              codesign --verify --deep --strict --verbose=2 "$UNPACKED"
+              codesign -d -r- "$UNPACKED" # the designated requirement (ad-hoc: a cdhash), for the notes
+              exe="$UNPACKED/Contents/MacOS/Orca"; resources="$UNPACKED/Contents/Resources" ;;
+          esac
+          out=$(ELECTRON_RUN_AS_NODE=1 HOME="$RUNNER_TEMP" "$exe" "$resources/app.asar.unpacked/out/cli/index.js" --version | tail -n 1)
+          [ "$out" = "$VERSION" ] || { echo "::error::packaged CLI says '$out', expected $VERSION"; exit 1; }
+
+      - name: Collect installers
+        timeout-minutes: 5
+        shell: bash
+        env:
+          ASSETS: ${{ matrix.assets }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # shellcheck disable=SC2086
+          cp $ASSETS release-assets/
+          ls -l release-assets
+          if [[ "$PLATFORM" == mac-* ]]; then
+            # This arch's dmg and zip, nothing else.
+            [ "$(ls release-assets | grep -cE '^orca-macos-(x64|arm64)\.dmg$')" = 1 ]
+            [ "$(ls release-assets | grep -cE -- '-mac\.zip$')" = 1 ]
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-release-${{ matrix.platform }}
+          path: release-assets/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+  release:
+    needs: [resolve, build]
+    if: github.repository == 'vbalien/orca'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fork-release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or resume the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Every platform's installers, nothing else (an incomplete draft must never look finished).
+          diff <(grep -v '^#' fork/release-assets.txt | sed "s/@V@/$VERSION/g" | sort) <(ls release-assets | sort) ||
+            { echo "::error::built installers differ from the required set"; exit 1; }
+          cd release-assets
+          sha256sum -- * >../SHA256SUMS.txt
+          cd ..
+          mv SHA256SUMS.txt release-assets/
+          git fetch --quiet --no-tags --filter=blob:none "$UPSTREAM_URL" "+refs/tags/v$VERSION:refs/tags/v$VERSION"
+          # Published, not published (drafts read as 404 from outside), or unknown — never guess.
+          PUBLISHED_STATES=("업스트림 GitHub Release로 게시된 태그" "**업스트림에서 아직 GitHub Release로 게시되지 않은 태그**" "**업스트림 게시 여부를 확인하지 못했다**")
+          published=${PUBLISHED_STATES[2]}
+          for attempt in 1 2 3; do
+            if draft=$(timeout -k 5 30 gh api "repos/stablyai/orca/releases/tags/v$VERSION" --jq '.draft' 2>err.txt); then
+              [ "$draft" = false ] && published=${PUBLISHED_STATES[0]} || published=${PUBLISHED_STATES[1]}
+              break
+            elif grep -q 'HTTP 404' err.txt; then
+              published=${PUBLISHED_STATES[1]}
+              break
+            fi
+            echo "upstream release lookup failed (attempt $attempt): $(head -c 300 err.txt)"
+            sleep $((attempt * 10))
+          done
+          git log --format='- %s' --reverse "v$VERSION..$SHA" >patches.md
+          render_notes() { # <업스트림 게시 여부 문구>
+            awk -v version="$VERSION" -v tag="$TAG" -v sha="$SHA" -v published="$1" '
+              /@PATCHES@/ { while ((getline line < "patches.md") > 0) print line; close("patches.md"); next }
+              { gsub(/@VERSION@/, version); gsub(/@TAG@/, tag); gsub(/@SHA@/, sha); gsub(/@PUBLISHED@/, published); print }
+            ' fork/release-notes.template.md
+          }
+          render_notes "$published" >notes.md
+          # This job is the only writer of a draft's assets, and only while the draft carries the uploading
+          # marker. Verification and publishing refuse a marked draft; a finished draft is never changed
+          # again (rebuild under the next release number instead).
+          MARK='<!-- fork-release: uploading -->'
+          expected=$(cd release-assets && for f in *; do printf '%s %s sha256:%s\n' "$f" "$(stat -c %s "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"; done | sort)
+          draft_assets() { gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[] | "\(.name) \(.size) \(.digest)"' | sort; }
+          if state=$(gh release view "$TAG" --repo "$REPO" --json isDraft,body \
+            --jq 'if .isDraft and (.body | contains("<!-- fork-release: uploading -->")) then "resume" elif .isDraft then "finished" else "published" end' 2>/dev/null); then
+            if [ "$state" = finished ]; then
+              # A rerun after the final edit landed but its response was lost: the finished draft is exactly this run's
+              # result (tag commit, every asset's name/size/sha256, notes) — nothing to change. Anything else is refused.
+              body=$(gh release view "$TAG" --repo "$REPO" --json body --jq .body)
+              commit=$(gh api "repos/$REPO/commits/$TAG" --jq .sha)
+              # The notes may have been written while the upstream release was in another state (it can be published
+              # between attempts): any of the three upstream-state lines counts, everything else must match exactly.
+              same_notes=''
+              for p in "${PUBLISHED_STATES[@]}"; do [ "$body" = "$(render_notes "$p")" ] && same_notes=1; done
+              if [ "$commit" = "$SHA" ] && [ "$(draft_assets)" = "$expected" ] && [ -n "$same_notes" ]; then
+                echo "Draft already finished by an earlier attempt of this run: $(gh release view "$TAG" --repo "$REPO" --json url --jq .url)" | tee -a "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            fi
+            [ "$state" = resume ] ||
+              { echo "::error::$TAG already exists and is $state with different content; refusing to change it (use the next number)"; exit 1; }
+          else
+            printf '%s\n업로드 중이다. 끝나면 이 글이 릴리즈 노트로 바뀐다.\n' "$MARK" >uploading.md
+            gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+              --title "Orca $VERSION 비공식 개인 포크 빌드 ($TAG)" --notes-file uploading.md
+          fi
+          gh release upload "$TAG" --repo "$REPO" --clobber release-assets/*
+          # Exactly the built files are on the draft, with the same size and sha256.
+          actual=$(draft_assets)
+          [ "$expected" = "$actual" ] || { echo "::error::draft assets differ"; diff <(echo "$expected") <(echo "$actual") || true; exit 1; }
+          # Finished: the notes replace the uploading marker.
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          echo "Draft: $(gh release view "$TAG" --repo "$REPO" --json url --jq .url)" | tee -a "$GITHUB_STEP_SUMMARY"
