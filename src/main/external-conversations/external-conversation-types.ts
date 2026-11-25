@@ -89,13 +89,16 @@ export const CONNECTOR_REFUSALS = [
   // A resume whose chat's newest turn no longer failed (NOT_FAILED_REFUSAL).
   'not_failed',
   // A Slack thread's mute or unmute that could not be saved to disk.
-  'thread_mute_not_saved'
+  'thread_mute_not_saved',
+  // Its deadline passed while it waited for its wake gate's turn (answered expired).
+  'delivery_expired'
 ] as const
 export type ConnectorRefusal = (typeof CONNECTOR_REFUSALS)[number]
 
 /** accepted confirms the chat took the message, not that the agent acted on it. */
 export type Delivery =
-  | { outcome: 'accepted' }
+  /** held: its wake gate blocked it; taken, and nothing was delivered. */
+  | { outcome: 'accepted'; held?: true }
   | { outcome: 'refused'; reason: ConnectorRefusal; failure?: ConnectorFailure }
   | {
       outcome: 'unknown'

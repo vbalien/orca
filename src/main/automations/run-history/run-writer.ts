@@ -55,8 +55,15 @@ export function createAutomationRunWriter(
       await store.flushPendingOrThrowAsync({ drainToStableGeneration: false })
       return automation
     },
-    createRun: async (automation, scheduledFor, trigger, event, id): Promise<AutomationRun> => {
-      const run = store.createAutomationRun(automation, scheduledFor, trigger, event, id)
+    createRun: async (
+      automation,
+      scheduledFor,
+      trigger,
+      event,
+      id,
+      settled
+    ): Promise<AutomationRun> => {
+      const run = store.createAutomationRun(automation, scheduledFor, trigger, event, id, settled)
       await store.flushPendingOrThrowAsync({ drainToStableGeneration: false })
       announce(automation.id, 'run')
       return run

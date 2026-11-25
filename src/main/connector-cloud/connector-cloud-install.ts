@@ -10,7 +10,10 @@ import type { ConnectorGitHubInstallations } from './connector-github-installati
 import type { ConnectorRuntimeKind } from './connector-machine'
 import { connectorBots, type ConnectorPlacesStore } from './connector-places'
 import { connectorAccount, desktopConnectorTokenMint } from './connector-token-mint'
-import { connectorTriggers, runTriggerDelivery } from './connector-triggers'
+import { connectorTriggers, runTriggerDelivery, triggerRunEvent } from './connector-triggers'
+import { createConnectorWakeGate } from './connector-wake-gate'
+import type { ConnectorTurnAutomation } from '../../shared/connector-trigger-event-contract'
+import { findLink } from '../external-conversations/external-conversation-links'
 import { hostNeedsConnector } from './connector-connection-need'
 import type { WebhookHostService } from '../webhooks/webhook-host-service'
 import { botPlaceMigrationOnHello } from '../automations/bot-automation-ref-migration'
@@ -104,6 +107,18 @@ export function createConnectorCloud({
   // Batches held when Orca last quit go out when due.
   prWaker.resume()
   const muteDeps = threadMuteDeps(runtime, store)
+  const wakeGate = createConnectorWakeGate({
+    bots: () => store.getBots?.() ?? [],
+    botsEnabled: () => runtime.bots.enabled(),
+    linkedBot: (key) => findLink(store, key)?.link.bot?.botId ?? null,
+    mentionsKnown: muteDeps.mentionsKnown ?? (() => true),
+    heldStart: (key) => runtime.getExternalConversationSeam()?.receipts.heldStart(key) ?? false
+  })
+  const carriedDeferred = (entries: readonly ConnectorTurnAutomation[]) =>
+    wakeGate.defersCarried(
+      entries,
+      (entry) => triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source
+    )
   return new ConnectorCloud({
     userDataPath,
     origin: resolveConnectorOrigin(process.env, environment.isPackaged()),
@@ -138,22 +153,35 @@ export function createConnectorCloud({
       },
       triggers: () =>
         connectorTriggers(store.listAutomations(), (hookId) => webhooks.pausing(hookId)),
-      runTrigger: (delivery) =>
-        runTriggerDelivery(
+      runTrigger: async (delivery, deadlineAt) => {
+        let expired = false
+        const ran = await runTriggerDelivery(
           {
             automations: store.listAutomations(),
             bots: store.getBots?.() ?? [],
             webhook: (call, event) => webhooks.receive(call, event),
-            run: (id, event) => runtime.runAutomationForEvent(id, event)
+            run: (id, event) =>
+              runtime.runAutomationForEvent(
+                id,
+                event,
+                wakeGate.triggerGate(delivery, event, deadlineAt, () => (expired = true))
+              )
           },
           delivery
-        ),
-      turnAutomations: (entries) =>
-        turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {
-          takes: (id, event) =>
-            takingAutomation(store, id, event) !== null && !eventRun(store, id, event),
-          run: (id, event, inTurn) => runtime.runAutomationForEvent(id, event, inTurn)
-        }),
+        )
+        return expired ? 'expired' : ran
+      },
+      wakeGate: wakeGate.wakeGate,
+      wakeGateApart: wakeGate.wakeGateApart,
+      wakeGateDefers: (entries) => carriedDeferred(entries),
+      turnAutomations: (entries, deferred = carriedDeferred(entries)) =>
+        deferred
+          ? null
+          : turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {
+              takes: (id, event) =>
+                takingAutomation(store, id, event) !== null && !eventRun(store, id, event),
+              run: (id, event, inTurn) => runtime.runAutomationForEvent(id, event, inTurn)
+            }),
       // Connectors off: no seam, so no bot thread to mute.
       threadMute: (delivery, record, carriedBefore) =>
         runtime.getExternalConversationSeam()

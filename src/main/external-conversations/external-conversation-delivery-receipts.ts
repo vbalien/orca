@@ -11,7 +11,7 @@ import { refused, type ConversationKey, type Delivery } from './external-convers
 export type DeliveryReceiptDb = OrchestrationDb
 
 const RecordedDelivery = z.discriminatedUnion('outcome', [
-  z.object({ outcome: z.literal('accepted') }),
+  z.object({ outcome: z.literal('accepted'), held: z.literal(true).optional() }),
   z.object({
     outcome: z.literal('unknown'),
     reason: z.enum(['writer_failed', 'replayed_after_restart'])
@@ -125,11 +125,35 @@ export class DeliveryReceipts {
     await this.run(key, deliveryId, 'connector.send', [text], async () => {
       const result = await done
       // Only an accepted turn leaves a receipt; any other outcome is the carrying delivery's to say.
-      return result.outcome === 'accepted'
-        ? { outcome: 'accepted' }
-        : refused('conversation_cancelled')
+      if (result.outcome !== 'accepted') {
+        return refused('conversation_cancelled')
+      }
+      return 'held' in result && result.held === true
+        ? { outcome: 'accepted', held: true }
+        : { outcome: 'accepted' }
     })
     return await done
+  }
+
+  /** Read-only: whether a start of this conversation was taken without reaching a chat (its wake
+   *  gate blocked it), as its still-kept receipt says. */
+  heldStart(key: ConversationKey): boolean {
+    return this.settledDb()
+      .listCompletedMutationReceipts(
+        callerFingerprint(key.source),
+        `${JSON.stringify([key.externalId]).slice(0, -1)},`,
+        'connector.start'
+      )
+      .some((receipt) => {
+        try {
+          const recorded = RecordedDelivery.safeParse(JSON.parse(receipt ?? 'null'))
+          return (
+            recorded.success && recorded.data.outcome === 'accepted' && recorded.data.held === true
+          )
+        } catch {
+          return false
+        }
+      })
   }
 
   /** Read-only: whether a receipt exists for the delivery, settled or still running. */

@@ -2,14 +2,16 @@
 import {
   ConnectorDeliveryId,
   type ConnectorAck,
-  type ConnectorConversation
+  type ConnectorConversation,
+  type ConnectorDeliveryResult
 } from '../../shared/connectors/connector-cloud-contract'
 import type { ExternalConversationHost } from '../external-conversations/external-conversation-host'
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
 import {
   dispatchDelivery,
   recordedDeliveryResult,
-  type DispatchedDelivery
+  type DispatchedDelivery,
+  type DispatchResult
 } from './connector-deliveries'
 import { connectorDeliveryUnits, dispatchBatch } from './connector-delivery-batches'
 import type { ConnectorMachine } from './connector-machine'
@@ -20,6 +22,19 @@ import {
 } from './connector-outbox'
 
 const MAX_ACKS_PER_REQUEST = 100
+
+/** What the cloud is told: `held` is this machine's own. */
+function wireResult(result: DispatchResult): ConnectorDeliveryResult {
+  // Its deadline passed while it waited for its wake gate.
+  if (result.outcome === 'refused' && result.reason === 'delivery_expired') {
+    return { outcome: 'expired' }
+  }
+  if (result.outcome !== 'accepted' || !result.held) {
+    return result
+  }
+  const { held: _held, ...wire } = result
+  return wire
+}
 
 export class ConnectorDeliveryAcks {
   private readonly acks: ConnectorOutbox<ConnectorAck>
@@ -90,7 +105,7 @@ export class ConnectorDeliveryAcks {
     const held = (delivery: { deliveryId: string; conversation: ConnectorConversation }) =>
       this.active.has(delivery.deliveryId) ||
       seam.receipts.known(delivery.conversation, delivery.deliveryId)
-    for (const unit of connectorDeliveryUnits(raws, held)) {
+    for (const unit of connectorDeliveryUnits(raws, held, machine.wakeGateApart)) {
       if ('raw' in unit) {
         this.deliver(unit.raw, msLeft, outbox)
         continue
@@ -144,7 +159,8 @@ export class ConnectorDeliveryAcks {
       // Only a committed admission is received; a refusal before the journal is done alone. Both
       // go in one push, so no request carries the received without its done.
       const unadmitted = this.unadmitted.delete(deliveryId)
-      const admitted = unadmitted && result.outcome === 'accepted'
+      // Held by its wake gate: taken with nothing admitted, so confirmed by done alone, as a mute's.
+      const admitted = unadmitted && result.outcome === 'accepted' && !result.held
       // Refused before its admission: confirmed by done alone, like onlyDone.
       if (unadmitted && !admitted) {
         this.onlyDone.add(deliveryId)
@@ -152,7 +168,7 @@ export class ConnectorDeliveryAcks {
       this.push(...(admitted ? [{ deliveryId, step: 'received' as const }] : []), {
         deliveryId,
         step: 'done',
-        result
+        result: wireResult(result)
       })
     })
   }
@@ -177,7 +193,7 @@ export class ConnectorDeliveryAcks {
     if (this.deps.signal.aborted) {
       return
     }
-    this.push({ deliveryId, step: 'done', result })
+    this.push({ deliveryId, step: 'done', result: wireResult(result) })
   }
 
   private push(...acks: ConnectorAck[]): void {

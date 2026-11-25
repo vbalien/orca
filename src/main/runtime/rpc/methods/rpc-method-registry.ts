@@ -92,6 +92,7 @@ import { CONNECTOR_METHODS } from './connectors/connector'
 import { CONNECTOR_SLACK_MIRROR_METHODS } from './connectors/connector-slack-mirror'
 import { BOT_GROUP_METHODS } from './bot-groups'
 import { BOT_METHODS } from './bots'
+import { BOT_SLACK_GATE_METHODS } from './bots-slack-gate'
 import { BOT_TAKE_OVER_METHOD } from './bots-take-over'
 import { BOT_RUN_SEND_AGAIN_METHOD } from './bots-run-send-again'
 import { BOT_ACCESS_METHODS } from './bots-access'
@@ -160,6 +161,7 @@ const CORE_RPC_METHODS = [
 
 const BOT_RPC_METHODS = [
   ...BOT_METHODS,
+  ...BOT_SLACK_GATE_METHODS,
   BOT_TAKE_OVER_METHOD,
   BOT_RUN_SEND_AGAIN_METHOD,
   ...BOT_GROUP_METHODS,
