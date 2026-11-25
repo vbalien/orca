@@ -13,6 +13,7 @@ import {
   saveSlackGateKey,
   useSlackGateKeyRoot
 } from '../../../bots/slack-gate/slack-gate-key'
+import { SlackGateSetKey } from '../../../../shared/rpc-contract/bots-slack-gate-params'
 import type { RpcContext } from '../core'
 import { BOT_SLACK_GATE_METHODS } from './bots-slack-gate'
 
@@ -143,6 +144,8 @@ describe('bots.slackGate key methods', () => {
     }
     expect(await readSlackGateKey('b1')).toBeNull()
     const { context } = contextFor({ kind: 'desktop' }, bot)
+    // A key is one header-safe line.
+    expect(SlackGateSetKey.safeParse({ botId: 'b1', key: 'sk-1\nX-Other: y' }).success).toBe(false)
     const answer = await call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)
     expect(answer).toEqual({ apiKeySet: true, sealing: 'os-keychain' })
     expect(JSON.stringify(answer)).not.toContain('secret')

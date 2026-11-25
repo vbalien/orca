@@ -168,13 +168,10 @@ export function createConnectorCloud({
       wakeGate: wakeGate.wakeGate,
       wakeGateApart: wakeGate.wakeGateApart,
       turnAutomations: (entries) =>
-        // A Slack automation whose bot gates triggers comes on its own, through that gate: the one
-        // inTurn flag can't leave out a single entry, so none rides the turn.
-        entries.some(
+        wakeGate.defersCarried(
+          entries,
           (entry) =>
-            wakeGate.gatesTrigger(entry.botId) &&
-            triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source ===
-              'slack'
+            triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source
         )
           ? null
           : turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {

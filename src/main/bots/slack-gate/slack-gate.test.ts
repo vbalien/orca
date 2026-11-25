@@ -146,6 +146,73 @@ describe('SlackGateDecider', () => {
     ])
   })
 
+  it('hands a freed slot straight to a waiter, so the bot never runs more than two checks', async () => {
+    let active = 0
+    let most = 0
+    const settles: ((code: number) => void)[] = []
+    const gate = new SlackGateDecider({
+      readKey: async () => null,
+      now: Date.now,
+      askJev: async () => ({ kind: 'error', error: 'unused' }),
+      runCommand: () => {
+        active += 1
+        most = Math.max(most, active)
+        const outcome = new Promise<SlackGateCommandOutcome>((resolve) =>
+          settles.push((code) => resolve({ kind: 'exit', code }))
+        )
+        const released = outcome.then(() => {
+          active -= 1
+        })
+        return { outcome, released }
+      }
+    })
+    const bot = { id: 'b', name: 'B', slackGate: command({ timeoutSeconds: 20 }) }
+    const first = [gate.decide(bot, event()), gate.decide(bot, event()), gate.decide(bot, event())]
+    await vi.waitFor(() => expect(settles).toHaveLength(2))
+    // Both running checks end together while one waits; two more arrive right after.
+    settles[0]?.(0)
+    settles[1]?.(0)
+    await Promise.all(first.slice(0, 2))
+    const more = [gate.decide(bot, event()), gate.decide(bot, event())]
+    await vi.waitFor(() => expect(settles.length).toBeGreaterThanOrEqual(3))
+    for (let i = 2; i < 5; i++) {
+      await vi.waitFor(() => expect(settles.length).toBeGreaterThan(i))
+      settles[i]?.(0)
+    }
+    await Promise.all([...first, ...more])
+    expect(most).toBe(2)
+  })
+
+  it('bounds a stalled key read by the timeout and never launches after it', async () => {
+    vi.useFakeTimers()
+    const { decider: gate, started } = decider([], { readKey: () => new Promise(() => {}) })
+    const bot = { id: 'b', name: 'B', slackGate: command({ timeoutSeconds: 1, onError: 'block' }) }
+    const decided = gate.decide(bot, event())
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(await decided).toMatchObject({ verdict: 'block', reason: 'error', timedOut: true })
+    expect(started).toHaveLength(0)
+  })
+
+  it('never carries a request error into the decision, which can reach automation history', async () => {
+    const jev: BotSlackGate = {
+      on: true,
+      kind: 'jev',
+      appliesTo: ['thread_reply'],
+      timeoutSeconds: 5,
+      onError: 'block',
+      jev: { question: 'q', threshold: 0.5 }
+    }
+    const { decider: gate } = decider([], {
+      readKey: async () => 'sk-secret',
+      askJev: async () => {
+        throw new TypeError('Invalid header value: Bearer sk-secret')
+      }
+    })
+    const decided = await gate.decide({ id: 'b', name: 'B', slackGate: jev }, event())
+    expect(decided).toMatchObject({ verdict: 'block', reason: 'error' })
+    expect(JSON.stringify(decided)).not.toContain('sk-secret')
+  })
+
   it('never runs a gate that does not apply', async () => {
     const { decider: gate, started } = decider([])
     const bot = { id: 'b', name: 'B', slackGate: command({ appliesTo: ['dm'] }) }

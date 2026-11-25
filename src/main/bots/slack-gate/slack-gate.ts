@@ -130,6 +130,11 @@ export class SlackGateDecider {
     timeoutAt: number
   ): Promise<{ outcome: Promise<Outcome>; released: Promise<void> }> {
     const key = await this.deps.readKey(bot.id).catch(() => null)
+    // Stopped while the key was read: nothing launches.
+    if (signal.aborted) {
+      const stopped: Outcome = { kind: 'error', error: 'Stopped' }
+      return { outcome: Promise.resolve(stopped), released: Promise.resolve() }
+    }
     if (gate.kind === 'command') {
       const run: SlackGateCommandRun = this.deps.runCommand({
         command: gate.command,
@@ -156,10 +161,9 @@ export class SlackGateDecider {
     }
     const asked = this.deps
       .askJev({ jev: gate.jev, event, key, signal })
-      .catch((error: unknown): SlackGateJevOutcome => ({
-        kind: 'error',
-        error: error instanceof Error ? error.message : 'TypeSafe request failed'
-      }))
+      // Never the thrown message: a malformed key can appear in a header error, and errors reach
+      // automation history.
+      .catch((): SlackGateJevOutcome => ({ kind: 'error', error: 'TypeSafe request failed' }))
     const outcome = asked.then((result): Outcome =>
       result.kind === 'score'
         ? { kind: 'verdict', wake: result.noul >= gate.jev.threshold, score: result.noul }
@@ -168,7 +172,8 @@ export class SlackGateDecider {
     return { outcome, released: asked.then(() => undefined) }
   }
 
-  /** Runs `work` in one of the bot's slots, held until its `released` settles. */
+  /** Runs `work` in one of the bot's slots, held until its `released` settles. A stop or deadline
+   *  ends the wait for an answer even while `work` is still starting (a stalled key read). */
   private async withSlot(
     botId: string,
     signal: AbortSignal,
@@ -176,39 +181,18 @@ export class SlackGateDecider {
   ): Promise<Outcome> {
     const slots = this.slots.get(botId) ?? new BotSlots()
     this.slots.set(botId, slots)
-    if (slots.running >= SLACK_GATE_RUNNING_PER_BOT) {
-      if (slots.waiting.length >= SLACK_GATE_WAITING_PER_BOT) {
-        return { kind: 'error', error: 'Too many gate checks are waiting for this bot' }
-      }
-      const admitted = await new Promise<boolean>((resolve) => {
-        const ready = () => {
-          signal.removeEventListener('abort', give)
-          resolve(true)
-        }
-        const give = () => {
-          const at = slots.waiting.indexOf(ready)
-          if (at !== -1) {
-            slots.waiting.splice(at, 1)
-          }
-          resolve(false)
-        }
-        slots.waiting.push(ready)
-        signal.addEventListener('abort', give, { once: true })
-      })
-      if (!admitted) {
-        return { kind: 'error', error: 'Stopped while waiting' }
-      }
+    if (slots.running < SLACK_GATE_RUNNING_PER_BOT) {
+      slots.running += 1
+    } else if (slots.waiting.length >= SLACK_GATE_WAITING_PER_BOT) {
+      return { kind: 'error', error: 'Too many gate checks are waiting for this bot' }
+    } else if (!(await this.handedSlot(slots, signal))) {
+      return { kind: 'error', error: 'Stopped while waiting' }
     }
-    slots.running += 1
-    let started: { outcome: Promise<Outcome>; released: Promise<void> }
-    try {
-      started = await work()
-    } catch (error) {
-      this.free(botId, slots)
-      return { kind: 'error', error: error instanceof Error ? error.message : 'failed' }
-    }
-    void started.released.catch(() => undefined).then(() => this.free(botId, slots))
-    // The runner stops on `signal`; this only bounds one that ignores it.
+    const started = work()
+    void started
+      .then((run) => run.released)
+      .catch(() => undefined)
+      .then(() => this.free(botId, slots))
     const giveUp = new Promise<Outcome>((resolve) => {
       const onAbort = () => {
         const timer = setTimeout(
@@ -223,15 +207,41 @@ export class SlackGateDecider {
         signal.addEventListener('abort', onAbort, { once: true })
       }
     })
-    return await Promise.race([started.outcome, giveUp])
+    const outcome = started.then(
+      (run) => run.outcome,
+      (): Outcome => ({ kind: 'error', error: 'The gate could not start' })
+    )
+    return await Promise.race([outcome, giveUp])
   }
 
+  /** Waits for a running check to hand its slot over; false when stopped first. */
+  private handedSlot(slots: BotSlots, signal: AbortSignal): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const ready = () => {
+        signal.removeEventListener('abort', give)
+        resolve(true)
+      }
+      const give = () => {
+        const at = slots.waiting.indexOf(ready)
+        if (at !== -1) {
+          slots.waiting.splice(at, 1)
+        }
+        resolve(false)
+      }
+      slots.waiting.push(ready)
+      signal.addEventListener('abort', give, { once: true })
+    })
+  }
+
+  /** A finished check hands its slot straight to the next waiter, so the count never dips. */
   private free(botId: string, slots: BotSlots): void {
-    slots.running -= 1
     const next = slots.waiting.shift()
     if (next) {
       next()
-    } else if (slots.running === 0) {
+      return
+    }
+    slots.running -= 1
+    if (slots.running === 0 && this.slots.get(botId) === slots) {
       this.slots.delete(botId)
     }
   }

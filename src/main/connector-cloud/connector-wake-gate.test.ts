@@ -299,6 +299,55 @@ describe('the wake gate in the conversation lane', () => {
   })
 })
 
+describe('the held start receipt across restarts and pruning', () => {
+  it('still answers chat_gone after a restart, and not_found once the ledger dropped the receipt', async () => {
+    const store = await home()
+    const blocked = connector(store, [bot()], deciding(false))
+    expect(await blocked.deliver(start(FRESH))).toEqual({ outcome: 'accepted', held: true })
+    orchestration.close()
+    orchestration = new OrchestrationDb(join(testState.dir, 'orchestration.db'))
+    const restarted = connector(store, [bot()], deciding(false))
+    expect(await restarted.deliver(send(FRESH))).toEqual({
+      outcome: 'refused',
+      reason: 'chat_gone'
+    })
+
+    // Older than the ledger keeps: the next receipt's admission prunes it.
+    orchestration.db
+      .prepare(`UPDATE mutation_receipts SET updated_at = datetime('now', '-31 days')`)
+      .run()
+    await restarted.deliver(start({ source: 'slack', externalId: 'T1:C1:1800000000.000800:U0BOT' }))
+    expect(restarted.receipts.heldStart(FRESH)).toBe(false)
+    expect(await restarted.deliver(send(FRESH))).toEqual({
+      outcome: 'refused',
+      reason: 'external_conversation_not_found'
+    })
+  })
+
+  it('loses the receipt to capacity pruning before 30 days when the ledger is full', async () => {
+    const store = await home()
+    const { deliver, receipts } = connector(store, [bot()], deciding(false))
+    expect(await deliver(start(FRESH))).toEqual({ outcome: 'accepted', held: true })
+    orchestration.db
+      .prepare(`UPDATE mutation_receipts SET updated_at = datetime('now', '-1 day')`)
+      .run()
+    orchestration.db
+      .prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000)
+         INSERT INTO mutation_receipts
+           (caller_fingerprint, request_id, method, payload_hash, state, receipt)
+         SELECT 'filler', 'r' || i, 'filler', 'h', 'completed', '{}' FROM n`
+      )
+      .run()
+    await deliver(start({ source: 'slack', externalId: 'T1:C1:1800000000.000800:U0BOT' }))
+    expect(receipts.heldStart(FRESH)).toBe(false)
+    expect(await deliver(send(FRESH))).toEqual({
+      outcome: 'refused',
+      reason: 'external_conversation_not_found'
+    })
+  })
+})
+
 describe('acks of a held delivery', () => {
   it('confirms it by done alone, without held on the wire', async () => {
     const store = await home()

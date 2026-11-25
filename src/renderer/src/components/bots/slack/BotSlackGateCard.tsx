@@ -100,6 +100,15 @@ const CASE_LABELS: Record<SlackGateCase, [string, string]> = {
 export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const t = useTranslate()
   const [draft, setDraft] = useState<Draft>(() => draftOf(bot.slackGate))
+  // The gate as saved; when it changes (a save, a removal, another device) an untouched form follows.
+  const saved = bot.slackGate ?? null
+  const [seen, setSeen] = useState(saved)
+  if (JSON.stringify(saved) !== JSON.stringify(seen)) {
+    setSeen(saved)
+    if (JSON.stringify(draft) === JSON.stringify(draftOf(seen))) {
+      setDraft(draftOf(saved))
+    }
+  }
   const [saving, setSaving] = useState(false)
   const [keyStatus, setKeyStatus] = useState<SlackGateKeyStatus | null>(null)
   const [keyInput, setKeyInput] = useState('')
@@ -170,12 +179,14 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label>{t('bots.slack.gate.kind', 'Check with')}</Label>
+          <Label htmlFor={`slack-gate-kind-${bot.id}`}>
+            {t('bots.slack.gate.kind', 'Check with')}
+          </Label>
           <Select
             value={draft.kind}
             onValueChange={(kind) => set({ kind: kind === 'command' ? 'command' : 'jev' })}
           >
-            <SelectTrigger size="sm">
+            <SelectTrigger id={`slack-gate-kind-${bot.id}`} size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -337,12 +348,14 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             />
           </div>
           <div className="flex flex-1 flex-col gap-1">
-            <Label>{t('bots.slack.gate.onError', 'If the check fails')}</Label>
+            <Label htmlFor={`slack-gate-on-error-${bot.id}`}>
+              {t('bots.slack.gate.onError', 'If the check fails')}
+            </Label>
             <Select
               value={draft.onError}
               onValueChange={(onError) => set({ onError: onError === 'block' ? 'block' : 'wake' })}
             >
-              <SelectTrigger size="sm">
+              <SelectTrigger id={`slack-gate-on-error-${bot.id}`} size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

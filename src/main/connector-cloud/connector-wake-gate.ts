@@ -148,10 +148,19 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
     return gated && caseKey(slackGateCaseOf(head, known)) !== caseKey(slackGateCaseOf(next, known))
   }
 
-  /** Whether a carried automation of this bot must wait for its own trigger gate. */
-  function gatesTrigger(botId: string): boolean {
-    const bot = deps.bots().find((entry) => entry.id === botId)
-    return Boolean(bot && slackGateApplies(bot, { case: 'trigger' }))
+  /** Whether a start or send's carried automations must come on their own, through the trigger
+   *  gate: one wire inTurn flag can't leave out a single entry, so if any Slack automation's bot
+   *  gates triggers, none rides the turn. `sourceOf` resolves an entry's source from its rule. */
+  function defersCarried<Entry extends { botId: string }>(
+    entries: readonly Entry[],
+    sourceOf: (entry: Entry) => string | undefined
+  ): boolean {
+    return entries.some((entry) => {
+      const bot = deps.bots().find((candidate) => candidate.id === entry.botId)
+      return (
+        Boolean(bot && slackGateApplies(bot, { case: 'trigger' })) && sourceOf(entry) === 'slack'
+      )
+    })
   }
 
   /** The start gate a Slack automation event passes; undefined when its bot gates no triggers. */
@@ -228,5 +237,5 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
     }
   }
 
-  return { wakeGate, wakeGateApart, gatesTrigger, triggerGate }
+  return { wakeGate, wakeGateApart, defersCarried, triggerGate }
 }
