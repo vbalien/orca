@@ -62,17 +62,20 @@ export function useBotSlackLocal(bot: Bot) {
   }, [refresh, bot])
 
   // The host tells no event when an answer fails or a socket drops: read it while shown, faster while
-  // a connection is being made.
+  // a connection is being made; a first read that failed is tried again at the slower pace.
   const connection = status?.mode === 'local' ? status.connection.state : null
+  const pollMs =
+    connection === 'connecting'
+      ? POLL_WHILE_CONNECTING_MS
+      : (connection !== null && connection !== 'paused') || (status === null && readError)
+        ? POLL_WHILE_SHOWN_MS
+        : null
   useEffect(() => {
-    if (connection === null || connection === 'paused') {
+    if (pollMs === null) {
       return
     }
-    return installWindowVisibilityInterval({
-      run: () => void refresh(),
-      intervalMs: connection === 'connecting' ? POLL_WHILE_CONNECTING_MS : POLL_WHILE_SHOWN_MS
-    })
-  }, [connection, refresh])
+    return installWindowVisibilityInterval({ run: () => void refresh(), intervalMs: pollMs })
+  }, [pollMs, refresh])
 
   /** Runs one change on the host; true when it took. */
   const run = useCallback(

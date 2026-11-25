@@ -1,17 +1,33 @@
-// Orca Cloud's Slack app still recorded on a bot that uses its own app (a hand-off redeemed after the
-// switch): said, and removable here without touching the own app's tokens or people.
-import React, { useState } from 'react'
+// Orca Cloud's Slack app still there for a bot that uses its own app (recorded, or a hand-off redeemed
+// after the switch, which only the cloud knows): said, and removable without touching the own app.
+import React, { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useTranslate } from '@/i18n/use-translate'
 import { refreshBotHost } from '@/lib/bot-catalog'
 import { botSlackCalls } from '@/lib/bot-connector-host-calls'
 import type { Bot } from '../../../../../shared/bot-types'
+import type { ConnectorBotSlackState } from '../../../../../shared/connector-bot-slack-contract'
+
+const gone = (entry: ConnectorBotSlackState): boolean =>
+  entry.state === 'not_created' || entry.state === 'grant_expired'
 
 export function BotSlackStrayCloudApp({ bot }: { bot: Bot }): React.JSX.Element | null {
   const t = useTranslate()
   const [busy, setBusy] = useState(false)
-  if (!bot.slack && (bot.slackApps?.length ?? 0) === 0) {
+  // The cloud's word when it can be asked; signed out, only what this computer recorded.
+  const [inCloud, setInCloud] = useState(false)
+  const recorded = Boolean(bot.slack) || (bot.slackApps?.length ?? 0) > 0
+  const read = useCallback(async () => {
+    const state = await botSlackCalls(bot.hostId).state({ botId: bot.id })
+    setInCloud(
+      state.ok && [state.value, ...(state.value.teams ?? [])].some((entry) => !gone(entry))
+    )
+  }, [bot.hostId, bot.id])
+  useEffect(() => {
+    void read()
+  }, [read])
+  if (!recorded && !inCloud) {
     return null
   }
   const remove = async (): Promise<void> => {
@@ -23,6 +39,7 @@ export function BotSlackStrayCloudApp({ bot }: { bot: Bot }): React.JSX.Element 
       return
     }
     await refreshBotHost(bot.hostId)
+    await read()
   }
   return (
     <div className="space-y-2 rounded-md border border-border p-3">
