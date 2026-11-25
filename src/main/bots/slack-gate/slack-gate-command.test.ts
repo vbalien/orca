@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,13 +13,18 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
+/** Still running: a process that exists and is not a zombie waiting to be reaped. */
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+  const state =
+    process.platform === 'linux'
+      ? (readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(1)?.charAt(0) ?? '')
+      : execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+  return !state.startsWith('Z')
 }
 
 const run = (command: string, fields: { timeoutMs?: number; key?: string | null } = {}) =>
