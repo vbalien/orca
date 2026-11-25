@@ -43,6 +43,7 @@ import { normalizeBotSidebarView } from '../../../../shared/bots/bot-sidebar-vie
 import { OWNER_ACTS_FOR } from '../../../../shared/bots/bot-acts-for'
 import { orcaSignInServer } from '../../../bots/orca-sign-in-server'
 import { refuseUnsavedFolderDrafts } from '../../repositories/folder-workspace-deletion'
+import { forgetSlackGateKey } from './bots-slack-gate'
 
 async function updateBot(params: BotUpdateParams, context: RpcContext) {
   if (params.updates.slackMirror !== undefined) {
@@ -264,6 +265,7 @@ export const BOT_METHODS = [
       }
       const deleted = await runtime.bots.delete(params)
       if (bot) {
+        await forgetSlackGateKey(bot.id)
         releaseDeletedBotLinks(runtime, bot)
         await composioBotsOf(runtime).forget(bot.id)
       }

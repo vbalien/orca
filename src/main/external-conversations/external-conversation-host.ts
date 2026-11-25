@@ -8,6 +8,7 @@ import type { ConversationPlaceNamer } from './external-conversation-place'
 import type { SlackMirror } from './slack-mirror'
 // What the conversation seam reaches on the host it runs for, and the host's clock.
 import type { ConversationBots } from './external-conversation-bots'
+import type { Delivery } from './external-conversation-types'
 import type { AskerImages } from './connector-asker-images'
 import type { ConversationChatHost } from './external-conversation-chat'
 import type { ConversationEventsDeps } from './external-conversation-events'
@@ -20,7 +21,16 @@ export type ExternalConversationHost = {
   bots?: ConversationBots
   /** Absent where chats start no orchestration workers. */
   workers?: ConversationWorkersHost
+  /** Asked in a delivery's lane right before it reaches its chat (a Slack wake gate): an outcome
+   *  settles the delivery with nothing delivered; null lets it go on. */
+  admit?: ConversationAdmission
 }
+
+/** `link` is null when the conversation has no link; a link without a bot reads as `{}`. */
+export type ConversationAdmission = (
+  signal: AbortSignal,
+  link: { botId?: string } | null
+) => Promise<Delivery | null>
 
 // Pending finishes must not keep the process alive.
 export const HOST_CLOCK: Pick<ConversationEventsDeps, 'setTimer' | 'now'> = {

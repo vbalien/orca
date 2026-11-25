@@ -145,7 +145,9 @@ describe('ConnectorPollClient', () => {
     ])
     await settle()
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ automationId: 'auto-1', triggerId: 't1' })
+      expect.objectContaining({ automationId: 'auto-1', triggerId: 't1' }),
+      // The deadline a Slack wake gate must answer by.
+      expect.any(Number)
     )
     // Only done: until the run exists, a resend is safe.
     expect(h.fake.acks).toEqual([

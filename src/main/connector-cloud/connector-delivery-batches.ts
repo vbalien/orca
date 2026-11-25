@@ -31,7 +31,9 @@ const askerOf = (delivery: RequestDelivery) => delivery.asker?.userId ?? null
  */
 export function connectorDeliveryUnits(
   raws: readonly unknown[],
-  held: (delivery: ThreadDelivery) => boolean
+  held: (delivery: ThreadDelivery) => boolean,
+  // A send that must not ride `head`'s turn (its wake gate would judge them differently).
+  apart?: (head: RequestDelivery, next: SendDelivery) => boolean
 ): DeliveryUnit[] {
   const units: DeliveryUnit[] = []
   // Each conversation's open batch, while the next of its deliveries may still join it.
@@ -60,7 +62,8 @@ export function connectorDeliveryUnits(
       delivery.kind === 'send' &&
       !delivery.bareMention &&
       !delivery.asker?.earlierOwn &&
-      askerOf(delivery) === askerOf(batch[0])
+      askerOf(delivery) === askerOf(batch[0]) &&
+      !apart?.(batch[0], delivery)
     ) {
       batch.push(delivery)
       continue
