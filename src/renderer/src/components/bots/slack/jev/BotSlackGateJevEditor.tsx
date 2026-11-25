@@ -195,7 +195,7 @@ export function BotSlackGateJevEditor(props: {
         </Disclosure>
         <Disclosure title={t('bots.slack.gate.jev.preview', 'Request preview')}>
           {parsed.ok ? (
-            <pre className="max-h-64 overflow-auto scrollbar-sleek rounded-md bg-muted p-2 font-mono text-[10px] leading-[14px]">
+            <pre className="max-h-64 overflow-auto scrollbar-sleek rounded-md bg-muted p-2 font-mono text-3xs">
               {formatSlackGateJevText(
                 slackGateJevRequest(
                   parsed.config,

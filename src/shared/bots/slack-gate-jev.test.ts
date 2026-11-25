@@ -122,18 +122,17 @@ describe('validateSlackGateJev', () => {
       'questions.assets:assets_unsupported',
       'questions.assets.criteria.assets:assets_unsupported'
     ])
-    // Past the kept problems, a broken question still never counts as valid.
-    const crowded = {
-      ...base,
-      extra: Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`n${i}`, Number.NaN]))
-    }
+    // Past the kept problems (60 unknown keys come first), a broken question still never counts as
+    // valid, and its rule is never read as if it were.
+    const crowded = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`junk${i}`, 1]))
     const broken = {
       ...crowded,
       questions: { ...base.questions, t: { type: 'choice' } },
       rules: [...base.rules, { question: 't', wakeIf: { oneOf: ['x'] } }]
     }
     expect(() => parseSlackGateJevText(JSON.stringify(broken))).not.toThrow()
-    expect(validateSlackGateJev(broken).ok).toBe(false)
+    expect(parseSlackGateJevText(JSON.stringify(broken)).ok).toBe(false)
+    expect(validateStoredSlackGateJev(broken).length).toBeGreaterThan(0)
     // A pasted wall of junk is reported briefly, not entry by entry.
     expect(
       codes({ ...base, rules: Array.from({ length: 5000 }, () => null) }).length
