@@ -5,13 +5,8 @@ import type {
 import type { AdmittedMessage } from '../native-chat/agent-session-wire/host/structured-agent-session-host-types'
 import { nameLinkedPlace } from './external-conversation-place'
 import { isBotAgent } from '../../shared/bot-types'
-import {
-  type ConversationChatHost,
-  chatTurnFacts,
-  watchChatNews
-} from './external-conversation-chat'
+import { type ConversationChatHost, chatTurnFacts } from './external-conversation-chat'
 import { answerConversation } from './external-conversation-answer'
-import { chatPromptFacts } from './external-conversation-chat-prompts'
 import { admittedChat, admittedLink, botChatFor } from './external-conversation-bots'
 import {
   ChatDeliveries,
@@ -22,15 +17,12 @@ import { cancelConversation } from './external-conversation-cancel'
 import { resumeRefusal } from './external-conversation-resume'
 import { ConversationChain, type QueuedWork } from './external-conversation-chain'
 import { GoneChats } from './external-conversation-gone-chats'
-import { ConversationEvents, type ConversationWatchListener } from './external-conversation-events'
+import type { ConversationEvents, ConversationWatchListener } from './external-conversation-events'
 import { conversationOwnsTurn } from './external-conversation-chat-turns'
-import { conversationWorkerActivities } from './external-conversation-workers'
-import { chatPromptReads } from './external-conversation-prompt-standing'
 import type { DeliveryReceipts } from './external-conversation-delivery-receipts'
-import {
-  HOST_CLOCK,
-  type ExternalConversationHost,
-  type ExternalConversationSeamDeps
+import type {
+  ExternalConversationHost,
+  ExternalConversationSeamDeps
 } from './external-conversation-host'
 import {
   findLink,
@@ -50,6 +42,8 @@ import {
 } from './external-conversation-types'
 
 import { recordAdmittedTurn, recordLastTurn } from './external-conversation-last-turn'
+import { isLocalSlackConversation } from '../../shared/connectors/local-slack-conversation'
+import { audienceEvents, localChatDeliveries } from './external-conversation-audience'
 export type { ExternalConversationSeamDeps } from './external-conversation-host'
 
 /** One enabled period: disabling settles queued work and aborts running work at its next boundary. */
@@ -62,8 +56,12 @@ export class ExternalConversationSeam {
     this.chain.after(conversationId(key), work)
   private readonly linked = new Map<string, { key: ConversationKey; worktreeId: string }>()
   private readonly chatDeliveries = new ChatDeliveries((...link) => this.linkChat(...link))
+  /** A bot's own Slack app's threads (slack-local): their deliveries, events and watch are kept
+   *  apart from Orca Cloud's, so an account reset or a cloud watch never touches them. */
+  private readonly localDeliveries = localChatDeliveries((...link) => this.linkChat(...link))
   /** Built by the first watcher, so an unwatched seam subscribes to nothing. */
   private events: ConversationEvents | null = null
+  private localEvents: ConversationEvents | null = null
   private readonly releaseRemovals: () => void
   /** Links whose chat was deleted: dropped, and the cloud told the thread is free. */
   readonly goneChats: GoneChats
@@ -86,9 +84,13 @@ export class ExternalConversationSeam {
     this.resetAccount()
     this.chatDeliveries.stopFollowing()
     this.abort.abort(reason)
+    // After the abort, so its watch's teardown starts no unwatched follower again.
+    this.localEvents?.dispose()
+    this.localDeliveries.stopFollowing()
   }
 
-  /** Signed out or switched account: drop what the last account's cloud was shown; keep working. */
+  /** Signed out or switched account: drop what the last account's cloud was shown; keep working.
+   *  A bot's own Slack app's threads belong to no Orca account, so they keep theirs. */
   resetAccount(): void {
     this.events?.reset()
     this.chatDeliveries.clear()
@@ -129,7 +131,7 @@ export class ExternalConversationSeam {
 
   /** Whether a chat's current or next turn is a connector's delivery, not its owner's. */
   deliveredTurn(sessionId: string): boolean {
-    return this.chatDeliveries.pending(sessionId)
+    return this.chatDeliveries.pending(sessionId) || this.localDeliveries.pending(sessionId)
   }
 
   /** Whether the chat's running turn is its conversation's, so workers it starts report there too: a
@@ -138,55 +140,54 @@ export class ExternalConversationSeam {
     const linked = findLinkForSession(this.deps.store, sessionId)
     return Boolean(
       linked &&
-      (conversationOwnsTurn(linked.link, this.turnFacts(chats)) ||
+      (conversationOwnsTurn(linked.link, this.turnFacts(chats, linked.link)) ||
         this.deps.slackMirror?.()?.turnPosted(sessionId))
     )
   }
 
-  private turnFacts(chats: ConversationChatHost | undefined) {
-    return chatTurnFacts(chats, this.deps.store, (id) => this.chatDeliveries.pending(id))
-  }
-
   /** Null unless a watch runs (replies need the connector) and the chat is linked. */
   replyTarget(paneKey: string): ReturnType<ConversationEvents['replyTarget']> {
-    return this.events?.replyTarget(paneKey) ?? null
+    return this.events?.replyTarget(paneKey) ?? this.localEvents?.replyTarget(paneKey) ?? null
   }
 
-  /** A snapshot of every linked conversation first, then its events; returns the release. */
+  private turnFacts(chats: ConversationChatHost | undefined, key: { source: string }) {
+    const { deliveries } = this.side(key)
+    return chatTurnFacts(chats, this.deps.store, (id) => deliveries.pending(id))
+  }
+
+  private side(key: { source: string }) {
+    return isLocalSlackConversation(key)
+      ? { events: this.localEvents, deliveries: this.localDeliveries }
+      : { events: this.events, deliveries: this.chatDeliveries }
+  }
+
+  /** A snapshot of every linked conversation first, then its events; returns the release. Orca
+   *  Cloud's: every conversation but a bot's own Slack app's. */
   watch(host: ExternalConversationHost, listener: ConversationWatchListener): () => void {
     if (this.abort.signal.aborted) {
       throw new Error('connectors_disabled')
     }
-    this.events ??= new ConversationEvents({
-      store: this.deps.store,
-      readHookRow: this.deps.readHookRow,
-      onAgentPaneChange: this.deps.onAgentPaneChange,
-      ...chatPromptReads(host.chat),
-      onChatNews: (listener) => (host.chat ? watchChatNews(host.chat, listener) : () => {}),
-      onWatchDisposed: () => this.chatDeliveries.followUnwatched(host.chat),
-      chatTurnOrigin: (sessionId, turnAt) => this.chatDeliveries.origin(sessionId, turnAt),
-      ...(this.deps.actsForOf ? { actsForOf: this.deps.actsForOf } : {}),
-      chatTurnDelivered: this.turnFacts(host.chat).delivered,
-      runningTurnReported: this.turnFacts(host.chat).reported,
-      chatTurnDelivery: (sessionId, turnAt) => this.chatDeliveries.started(sessionId, turnAt),
-      chatTurnWaiting: (sessionId) => this.chatDeliveries.waiting(sessionId),
-      workLinks: async (link) => (await host.bots?.workLinks(link)) ?? [],
-      workerActivities: (links) => conversationWorkerActivities(host, links),
-      promptsAudience: () => this.deps.promptsAudience?.() === true,
-      mirrorTurn: (sessionId) => this.deps.slackMirror?.()?.turnEnded(sessionId) ?? null,
-      replyFill: () => this.deps.replyFill?.() ?? null,
-      ...chatPromptFacts(host.chat),
-      ...HOST_CLOCK
-    })
+    this.events ??= audienceEvents('cloud', this.deps, host, this.chatDeliveries, this.signal)
     this.chatDeliveries.stopFollowing()
     const release = this.events.watch(listener)
     this.deps.watched?.()
     return release
   }
 
+  /** The same for a bot's own Slack app's threads only, which this computer answers itself: no
+   *  Slack mirror, reply outbox or cloud flush, and untouched by an Orca account reset. */
+  watchLocal(host: ExternalConversationHost, listener: ConversationWatchListener): () => void {
+    if (this.abort.signal.aborted) {
+      throw new Error('connectors_disabled')
+    }
+    this.localEvents ??= audienceEvents('local', this.deps, host, this.localDeliveries, this.signal)
+    this.localDeliveries.stopFollowing()
+    return this.localEvents.watch(listener)
+  }
+
   /** A turn end held for the owner's Slack posts, told now; false while nothing watches. */
   tellTurnEnd(event: Parameters<ConversationEvents['tell']>[0]): boolean {
-    return this.events?.tell(event) ?? false
+    return this.side(event.conversation).events?.tell(event) ?? false
   }
 
   /** A bot's conversation is a native chat, which starts whether or not status hooks are on. */
@@ -259,7 +260,7 @@ export class ExternalConversationSeam {
       return false
     }
     try {
-      this.chatDeliveries.adopt(key, chat, text)
+      this.side(key).deliveries.adopt(key, chat, text)
     } catch (error) {
       console.warn('[connectors] could not link an automation run to its thread', error)
       return false
@@ -273,16 +274,18 @@ export class ExternalConversationSeam {
     const fresh = findLink(this.deps.store, key) === null
     const written = writeChatLink(this.deps.store, key, chat, text)
     const linked = (asker && this.deps.slackMirror?.()?.opened(written, asker, fresh)) || written
+    const { events } = this.side(key)
     if (linked) {
-      this.events?.linked(linked, this.deps.actsForOf?.(chat.sessionId))
+      events?.linked(linked, this.deps.actsForOf?.(chat.sessionId))
       this.deps.onLinked?.()
     } else {
       const kept = findLink(this.deps.store, key)
       if (kept) {
-        this.events?.delivered(kept.link)
+        events?.delivered(kept.link)
       }
     }
-    if (asker && chat.bot) {
+    // A bot's own Slack app's channel is never named through Orca Cloud.
+    if (asker && chat.bot && !isLocalSlackConversation(key)) {
       void nameLinkedPlace(this.deps, key, chat.bot.botId, asker.place, this.abort.signal)
     }
   }
@@ -294,7 +297,7 @@ export class ExternalConversationSeam {
 
   private unlinked(dropped: LinkedConversation): void {
     this.linked.delete(conversationId(dropped.link))
-    this.events?.unlinked(dropped)
+    this.side(dropped.link).events?.unlinked(dropped)
     this.deps.onLinked?.()
   }
 
@@ -305,15 +308,19 @@ export class ExternalConversationSeam {
     message: ConnectorMessage & { deliveryId: string },
     signal: AbortSignal
   ): Promise<Delivery> {
+    // Orca Cloud's Slack never reaches a bot that answers Slack through its own app.
+    if (key.source === 'slack' && chat.bot && this.deps.usesLocalSlack?.(chat.bot.botId)) {
+      return refused('bot_not_found')
+    }
     this.linked.set(conversationId(key), { key, worktreeId: chat.worktreeId })
     // A bot's request may list images; they go with its words, so the agent sees them at once.
     const images =
-      chat.bot && message.asker && this.deps.askerImages
+      chat.bot && message.asker && this.deps.askerImages && !isLocalSlackConversation(key)
         ? await this.deps
             .askerImages({ botId: chat.bot.botId, conversation: key, asker: message.asker, signal })
             .catch(() => [])
         : []
-    const delivered = await this.chatDeliveries.deliver(host.chat, key, chat, {
+    const delivered = await this.side(key).deliveries.deliver(host.chat, key, chat, {
       ...message,
       signal,
       ...(images.length > 0 ? { images } : {})

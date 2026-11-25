@@ -7976,6 +7976,9 @@
     },
     "memoryHistory": {
       "tidyUp": "Tidy-up"
+    },
+    "slackLocal": {
+      "phoneRow": "Your own Slack app. Set it up in Orca on the computer this bot runs on."
     }
   },
   "mobileWebShell": {

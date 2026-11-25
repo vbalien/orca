@@ -9,6 +9,7 @@ import { browserManager } from '../../browser/guest-lifecycle/manager/browser-ma
 import { installGoogleSetupHostWatch } from '../../google/google-setup-host-watch'
 import { getProfileUserDataPath } from '../../orca-profiles/profile-storage-paths'
 import { mainProcessState as state } from '../main-process-state'
+import { installSlackLocal, stopSlackLocal } from '../../slack-local/slack-local-install'
 
 /**
  * The desktop's or Electron `orca serve`'s connector, as this process's own Orca account.
@@ -36,6 +37,7 @@ export function installMainProcessConnectorCloud(serve: boolean): void {
   if (serve) {
     return
   }
+  installSlackLocal(runtime, state.store, userDataPath)
   powerMonitor.on('resume', host.refreshLinearLogins)
   registerGoogleSetupHandlers()
   registerSlackHandOffHandlers(() => runtime.getConnectorCloud())
@@ -51,6 +53,7 @@ export function mainProcessConnectorCloud(): ConnectorCloud | null {
 export function fenceMainProcessCloudOnQuit(): void {
   state.core.relayHost?.fence()
   mainProcessConnectorCloud()?.fence()
+  stopSlackLocal()
 }
 
 // Registered with the relay; like it, the first request waits for the persisted proxy.

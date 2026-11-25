@@ -12,6 +12,7 @@ import {
   type BotMember
 } from '../../../src/shared/bot-types'
 import { BOT_CONNECTOR_NAMES } from '../../../src/shared/bots/bot-templates'
+import { LOCAL_SLACK_SOURCE } from '../../../src/shared/connectors/local-slack-conversation'
 import type { BotAccessConnector } from '../../../src/shared/bots/bot-access-reach'
 import {
   gitHubLinkedAccounts,
@@ -284,6 +285,15 @@ export function whoCanAskConnectors({
       const title = BOT_CONNECTOR_NAMES[kind]
       connectors.push({ ...unreachable(kind, title, left, ''), key: `${kind}:other` })
     }
+  }
+  // The bot's own Slack app's people: removed here, added only in Orca on its computer.
+  const local = botMembersFrom(bot.members, LOCAL_SLACK_SOURCE)
+  if (local.length > 0) {
+    connectors.push({
+      ...unreachable('slack', BOT_CONNECTOR_NAMES.slack, local, ''),
+      key: LOCAL_SLACK_SOURCE,
+      stamp: { source: LOCAL_SLACK_SOURCE }
+    })
   }
   return connectors
 }

@@ -1,4 +1,5 @@
 // Who can ask the bot, every connector at once: each Slack workspace, Linear workspace and GitHub org's own whole list.
+import { BotSlackLocalCard } from '../slack/BotSlackLocalCard'
 import type { Bot, BotLinear } from '../../../../../shared/bot-types'
 import type { ConnectorGitHubInstallation } from '../../../../../shared/connector-bot-github-contract'
 import { BotNoConnectors } from '../../settings/bots/BotConnectorsSection'
@@ -97,7 +98,12 @@ export function BotWhoCanAskPage({ bot }: { bot: Bot }): React.JSX.Element {
       {entries.map((entry) => {
         switch (entry.kind) {
           case 'slack':
-            return <SlackPeople key={entry.key} bot={bot} entry={entry} />
+            // The bot's own app keeps its people with its settings: one place to add and remove them.
+            return entry.key === 'slack-local' ? (
+              <BotSlackLocalCard key={entry.key} bot={bot} defaultOpen />
+            ) : (
+              <SlackPeople key={entry.key} bot={bot} entry={entry} />
+            )
           case 'linear':
             return <LinearPeople key={entry.key} bot={bot} entry={entry} linear={entry.linear} />
           case 'github':

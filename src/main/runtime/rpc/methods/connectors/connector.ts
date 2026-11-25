@@ -1,5 +1,11 @@
 /** connector.* conversation handlers act on this host's seam, regardless of caller. */
 
+import { isLocalSlackConversation } from '../../../../../shared/connectors/local-slack-conversation'
+import { usesLocalSlack } from '../../../../../shared/bots/bot-slack-connection'
+import {
+  LOCAL_SLACK_ACTION_REFUSAL,
+  localSlackActionRefusal
+} from '../../../../slack-local/slack-local-action-policy'
 import {
   cloudConversation,
   CONNECTOR_REPLIES_OUTBOX_FEATURE
@@ -40,6 +46,10 @@ export const CONNECTOR_METHODS = [
       if (!target) {
         throw new Error('not_a_cloud_conversation')
       }
+      // A bot's own Slack app's thread gets its final message from this computer, never the cloud.
+      if (isLocalSlackConversation(target.key)) {
+        throw new Error(LOCAL_SLACK_ACTION_REFUSAL)
+      }
       // A bot posts only into the conversation its chat is bound to, as that bot.
       const botRefusal = botReplyRefusal(
         target,
@@ -51,6 +61,19 @@ export const CONNECTOR_METHODS = [
       const conversation = cloudConversation(target.key)
       if (!conversation) {
         throw new Error('not_a_cloud_conversation')
+      }
+      // A bot on its own Slack app replies through the cloud only in Linear or GitHub, as with act.
+      const speaker = context.runtime.bots.list().find((bot) => bot.id === target.bot?.botId)
+      const localRefusal = localSlackActionRefusal({
+        botUsesLocalSlack: speaker !== undefined && usesLocalSlack(speaker),
+        linked: null,
+        cloudTarget: conversation,
+        verb: 'reply',
+        ref: undefined,
+        args: {}
+      })
+      if (localRefusal) {
+        throw new Error(localRefusal)
       }
       if (target.turnId === null) {
         throw new Error('no_current_turn')

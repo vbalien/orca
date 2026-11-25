@@ -1,3 +1,4 @@
+import { botUsesLocalSlack } from '../../shared/bots/bot-slack-connection'
 import type { RuntimeStore } from '../runtime/construction/runtime-store-contract'
 import {
   installLeaveLines,
@@ -131,6 +132,7 @@ export function installExternalConversations(
     const restartCuts = heldTurnEnds(() => seam)
     seam = new ExternalConversationSeam({
       slackMirror: () => mirror,
+      usesLocalSlack: (botId) => botUsesLocalSlack(store.getBots?.() ?? [], botId),
       watched: () => {
         mirror?.flushHeld()
         restartCuts.flush()
