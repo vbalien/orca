@@ -9,6 +9,8 @@ import type { Bot } from '../../../shared/bot-types'
 import { readSlackGateKey } from './slack-gate-key'
 import { runSlackGateCommand, type SlackGateCommandRun } from './slack-gate-command'
 import { askSlackGateJev, type SlackGateJevOutcome } from './slack-gate-jev'
+import { decideSlackGateJevRules, type SlackGateJevRuleResult } from './slack-gate-jev-rules'
+import { slackGateJevConfigOf } from '../../../shared/bots/slack-gate-jev-config'
 
 export type SlackWakeDecision = {
   verdict: 'wake' | 'block'
@@ -17,6 +19,9 @@ export type SlackWakeDecision = {
   exitCode?: number | null
   timedOut?: boolean
   score?: number
+  /** Jev: each question's answer (numbers or choice names) and each rule's result. No message text. */
+  answers?: Record<string, number | string>
+  rules?: SlackGateJevRuleResult[]
   error?: string
 }
 
@@ -36,12 +41,25 @@ const STOP_GRACE_MS = 2_000
 
 type Stop = 'cancelled' | 'expired' | 'timeout'
 type Outcome =
-  | { kind: 'verdict'; wake: boolean; exitCode?: number | null; score?: number }
+  | {
+      kind: 'verdict'
+      wake: boolean
+      exitCode?: number | null
+      score?: number
+      answers?: Record<string, number | string>
+      rules?: SlackGateJevRuleResult[]
+    }
   | { kind: 'error'; error: string; exitCode?: number | null; timedOut?: true }
 
 class BotSlots {
   running = 0
   readonly waiting: (() => void)[] = []
+}
+
+/** A command gate's input is the event as it always was: newer fields for Jev rules stay out. */
+function commandEvent(event: SlackGateEvent): Omit<SlackGateEvent, 'contextIncomplete'> {
+  const { contextIncomplete: _jevOnly, ...rest } = event
+  return rest
 }
 
 export class SlackGateDecider {
@@ -106,7 +124,9 @@ export class SlackGateDecider {
           reason: outcome.wake ? 'passed' : 'blocked',
           durationMs: elapsed(),
           ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}),
-          ...(outcome.score !== undefined ? { score: outcome.score } : {})
+          ...(outcome.score !== undefined ? { score: outcome.score } : {}),
+          ...(outcome.answers ? { answers: outcome.answers } : {}),
+          ...(outcome.rules ? { rules: outcome.rules } : {})
         })
       }
       return this.finish(bot, event, {
@@ -144,7 +164,7 @@ export class SlackGateDecider {
     if (gate.kind === 'command') {
       const run: SlackGateCommandRun = this.deps.runCommand({
         command: gate.command,
-        stdin: JSON.stringify({ v: 1, botId: bot.id, botName: bot.name, ...event }),
+        stdin: JSON.stringify({ v: 1, botId: bot.id, botName: bot.name, ...commandEvent(event) }),
         key,
         timeoutMs: Math.max(1, timeoutAt - this.deps.now()),
         signal
@@ -166,15 +186,24 @@ export class SlackGateDecider {
       return { outcome, released: run.released }
     }
     const asked = this.deps
-      .askJev({ jev: gate.jev, event, key, signal })
+      .askJev({ jev: gate.jev, bot: { name: bot.name }, event, key, signal })
       // Never the thrown message: a malformed key can appear in a header error, and errors reach
       // automation history.
       .catch((): SlackGateJevOutcome => ({ kind: 'error', error: 'TypeSafe request failed' }))
-    const outcome = asked.then((result): Outcome =>
-      result.kind === 'score'
-        ? { kind: 'verdict', wake: result.noul >= gate.jev.threshold, score: result.noul }
-        : { kind: 'error', error: result.error }
-    )
+    const { config } = slackGateJevConfigOf(gate.jev)
+    const outcome = asked.then((result): Outcome => {
+      if (result.kind === 'error') {
+        return { kind: 'error', error: result.error }
+      }
+      const verdict = decideSlackGateJevRules(config, result.answers)
+      return {
+        kind: 'verdict',
+        wake: verdict.wake,
+        answers: verdict.answers,
+        rules: verdict.rules,
+        ...(verdict.score !== undefined ? { score: verdict.score } : {})
+      }
+    })
     return { outcome, released: asked.then(() => undefined) }
   }
 
@@ -265,7 +294,9 @@ export class SlackGateDecider {
       reason: decision.reason,
       durationMs: decision.durationMs,
       ...(decision.exitCode !== undefined ? { exitCode: decision.exitCode } : {}),
-      ...(decision.score !== undefined ? { score: decision.score } : {})
+      ...(decision.score !== undefined ? { score: decision.score } : {}),
+      ...(decision.answers ? { answers: decision.answers } : {}),
+      ...(decision.rules ? { rules: decision.rules } : {})
     })
     return decision
   }
