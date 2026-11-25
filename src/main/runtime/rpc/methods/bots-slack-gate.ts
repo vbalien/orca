@@ -69,7 +69,8 @@ export function slackGateToStore(
     const kept = slackGateJevConfigOf(saved.jev).config
     const mirror = slackGateJevLegacyMirror(kept)
     if (
-      gate.jev.question !== mirror.question ||
+      // Surrounding spaces don't make it another question (a client may have trimmed them).
+      gate.jev.question?.trim() !== mirror.question.trim() ||
       gate.jev.threshold !== mirror.threshold ||
       effectiveModel(gate.jev.model) !== effectiveModel(kept.model)
     ) {

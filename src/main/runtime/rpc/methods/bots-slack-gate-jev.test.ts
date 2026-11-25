@@ -64,6 +64,17 @@ describe('slackGateToStore', () => {
     const merged = slackGateToStore(saved, older)
     expect(merged).toMatchObject({ on: false, timeoutSeconds: 9 })
     expect(merged?.kind === 'jev' && merged.jev.rules).toEqual(config.rules)
+    // The mirror's question with its surrounding spaces trimmed is still the same question.
+    const spaced = slackGateToStore(
+      null,
+      jevGate({
+        ...config,
+        questions: { ...config.questions, asks: { type: 'noul', instructions: '  Asks?  ' } }
+      })
+    )
+    expect(
+      slackGateToStore(spaced, jevGate({ question: 'Asks?', threshold: 0.7 }, { on: false }))
+    ).toMatchObject({ on: false })
     // A different question from it would replace the rules: refused.
     expect(() => slackGateToStore(saved, jevGate({ question: 'Other?', threshold: 0.7 }))).toThrow(
       'This gate uses Jev rules from a newer Orca.'
