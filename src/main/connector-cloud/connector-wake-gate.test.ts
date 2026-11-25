@@ -16,7 +16,12 @@ import { findLink, writeLink } from '../external-conversations/external-conversa
 import { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
 import { closeTestStores, createStore, testState } from '../persistence/persistence-test-harness'
 import { OrchestrationDb } from '../runtime/orchestration/db/orchestration-db'
-import type { decideSlackWake, SlackWakeDecision } from '../bots/slack-gate/slack-gate'
+import {
+  SlackGateDecider,
+  type decideSlackWake,
+  type SlackWakeDecision
+} from '../bots/slack-gate/slack-gate'
+import { askSlackGateJev } from '../bots/slack-gate/slack-gate-jev'
 import { ConnectorDeliveryAcks } from './connector-delivery-acks'
 import { dispatchDelivery, type DispatchMachine } from './connector-deliveries'
 import { createConnectorWakeGate, type WakeGateBot } from './connector-wake-gate'
@@ -441,5 +446,63 @@ describe('acks of a held delivery', () => {
     expect(await acked(again, [head, follower])).toEqual(expect.arrayContaining(doneOnly))
     expect(again).not.toHaveBeenCalled()
     expect(findLink(store, FRESH)).toBeNull()
+  })
+})
+
+describe('a Jev gate with rules on the cloud path', () => {
+  it('asks TypeSafe with the configured questions and state, and holds what the rules block', async () => {
+    const bodies: { state: Record<string, unknown>; questions: unknown }[] = []
+    let chat = 0.95
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return Response.json({
+        answers: { asks: { type: 'noul', noul: 0.9 }, chat: { type: 'noul', noul: chat } }
+      })
+    })
+    const decider = new SlackGateDecider({
+      readKey: async () => 'k1',
+      now: Date.now,
+      askJev: (input) => askSlackGateJev({ ...input, fetch }),
+      runCommand: () => {
+        throw new Error('unused')
+      }
+    })
+    const rules: BotSlackGate = {
+      ...gate(),
+      kind: 'jev',
+      appliesTo: ['mention', 'thread_reply'],
+      jev: {
+        questions: { asks: { type: 'noul', instructions: 'Asks?' }, chat: { type: 'noul' } },
+        send: { message: true, earlierMessages: true, botName: true },
+        rules: [
+          { question: 'asks', wakeIf: { atLeast: 0.7 } },
+          { question: 'chat', blockIf: { atLeast: 0.8 } }
+        ]
+      }
+    }
+    const store = await home()
+    const { deliver } = connector(store, [bot({ slackGate: rules })], (b, e, o) =>
+      decider.decide(b, e, o)
+    )
+    const unreadable = { ...asker('1800000000.000500'), context: [{ kind: 'unreadable' as const }] }
+    expect(await deliver(start(FRESH, { asker: unreadable }))).toEqual({
+      outcome: 'accepted',
+      held: true
+    })
+    expect(bodies[0]).toEqual({
+      model: 'jev-latest',
+      state: {
+        message: 'please look',
+        earlierMessages: ['(this thread could not be read)'],
+        botName: 'Reviewer'
+      },
+      questions: rules.kind === 'jev' ? rules.jev.questions : null
+    })
+    chat = 0.1
+    const fresh = { source: 'slack' as const, externalId: 'T1:C1:1800000000.000700:U0BOT' }
+    // Woken, it goes on to the chat start (which this test's host has no chat for): never held.
+    const woken = await deliver(start(fresh, { asker: asker('1800000000.000700') }))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(woken).not.toEqual({ outcome: 'accepted', held: true })
   })
 })
