@@ -1,6 +1,6 @@
 // How a bot's Slack reaches it: through Orca Cloud's app (the default), or through the owner's own
 // Slack app that this computer connects to directly. Tokens never live here: they are sealed apart.
-import { z } from 'zod'
+import * as z from 'zod'
 import { LOCAL_SLACK_SOURCE } from '../connectors/local-slack-conversation'
 
 const SlackId = z.string().regex(/^[A-Z0-9]{2,32}$/)
