@@ -7,6 +7,9 @@ declare const ORCA_POSTHOG_WRITE_KEY: string | null
 // ORCA_DIAGNOSTICS_TOKEN_URL overrides it for developers testing packaged builds against staging.
 declare const ORCA_DIAGNOSTICS_TOKEN_URL: string | null
 
+// True in builds of the vbalien/orca fork (its self-update is off); undefined upstream and in tests.
+declare const ORCA_FORK_BUILD: boolean | undefined
+
 // Full commit the build was made from (`git rev-parse HEAD`); official skill installs pin to it.
 declare const ORCA_BUILD_COMMIT: string
 

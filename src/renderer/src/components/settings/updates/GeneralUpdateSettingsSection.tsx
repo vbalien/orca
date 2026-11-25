@@ -15,6 +15,7 @@ import {
 } from '@/app-shell/updates/update-check-click-options'
 import { GeneralRemoteServerUpdates } from './GeneralRemoteServerUpdates'
 import { ReleaseChannelSection } from './ReleaseChannelSection'
+import { ForkUpdatesOffSetting } from './ForkUpdatesOffSetting'
 import { UpdateDelaySetting } from './UpdateDelaySetting'
 import { AutomaticUpdatesSetting } from './AutomaticUpdatesSetting'
 import { isWebClientLocation } from '@/app-shell/platform/web-client-location'
@@ -72,6 +73,17 @@ export function GeneralUpdateSettingsSection({
       cancelled = true
     }
   }, [])
+
+  // A fork build never updates itself: only the version, why, and where new builds are.
+  if (updateStatus.state === 'not-available' && updateStatus.forkUpdatesOff) {
+    return (
+      <SettingsGroup key="updates" title={t('settings.general.about.title', 'About')}>
+        <ForkUpdatesOffSetting appVersion={appVersion} />
+        <GeneralRemoteServerUpdates />
+        {children}
+      </SettingsGroup>
+    )
+  }
 
   const handleRestartToUpdate = (): void => {
     void window.api.updater.quitAndInstall().catch((error: unknown) => {
