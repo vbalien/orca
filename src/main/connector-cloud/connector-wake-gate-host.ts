@@ -39,10 +39,12 @@ export function gatedHost(
   return admit ? { ...host, admit } : host
 }
 
-/** A send that waits before going on (its muted thread's unmute) keeps the wake gate and carried
- *  automations its dispatch saw, so a settings change meanwhile doesn't change its admission. */
+/** A send that waits before going on (its muted thread's unmute) keeps the wake gate admission and
+ *  the carried-automation deferral its dispatch saw, so a settings change meanwhile doesn't change
+ *  them; which automations still apply, and their instructions, are read when it goes on. */
 export function gateSnapshot<
-  Machine extends Pick<ConnectorMachine, 'wakeGate' | 'turnAutomations'>
+  Machine extends Pick<ConnectorMachine, 'wakeGate' | 'turnAutomations'> &
+    Partial<Pick<ConnectorMachine, 'wakeGateDefers'>>
 >(
   machine: Machine,
   delivery: Send,
@@ -50,10 +52,13 @@ export function gateSnapshot<
   msLeft: (expiresAt: number) => number
 ): Machine {
   const admit = machine.wakeGate?.(delivery, later, gateDeadline(delivery, msLeft))
-  const inTurn =
-    machine.turnAutomations?.([
-      ...(delivery.automations ?? []),
-      ...later.flatMap((next) => next.automations ?? [])
-    ]) ?? null
-  return { ...machine, wakeGate: () => admit, turnAutomations: () => inTurn }
+  const deferred = machine.wakeGateDefers?.([
+    ...(delivery.automations ?? []),
+    ...later.flatMap((next) => next.automations ?? [])
+  ])
+  return {
+    ...machine,
+    wakeGate: () => admit,
+    turnAutomations: (entries) => machine.turnAutomations?.(entries, deferred) ?? null
+  }
 }

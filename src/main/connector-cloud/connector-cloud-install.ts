@@ -12,6 +12,7 @@ import { connectorBots, type ConnectorPlacesStore } from './connector-places'
 import { connectorAccount, desktopConnectorTokenMint } from './connector-token-mint'
 import { connectorTriggers, runTriggerDelivery, triggerRunEvent } from './connector-triggers'
 import { createConnectorWakeGate } from './connector-wake-gate'
+import type { ConnectorTurnAutomation } from '../../shared/connector-trigger-event-contract'
 import { findLink } from '../external-conversations/external-conversation-links'
 import { hostNeedsConnector } from './connector-connection-need'
 import type { WebhookHostService } from '../webhooks/webhook-host-service'
@@ -113,6 +114,11 @@ export function createConnectorCloud({
     mentionsKnown: muteDeps.mentionsKnown ?? (() => true),
     heldStart: (key) => runtime.getExternalConversationSeam()?.receipts.heldStart(key) ?? false
   })
+  const carriedDeferred = (entries: readonly ConnectorTurnAutomation[]) =>
+    wakeGate.defersCarried(
+      entries,
+      (entry) => triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source
+    )
   return new ConnectorCloud({
     userDataPath,
     origin: resolveConnectorOrigin(process.env, environment.isPackaged()),
@@ -167,12 +173,9 @@ export function createConnectorCloud({
       },
       wakeGate: wakeGate.wakeGate,
       wakeGateApart: wakeGate.wakeGateApart,
-      turnAutomations: (entries) =>
-        wakeGate.defersCarried(
-          entries,
-          (entry) =>
-            triggerRunEvent(store.listAutomations(), store.getBots?.() ?? [], entry)?.source
-        )
+      wakeGateDefers: (entries) => carriedDeferred(entries),
+      turnAutomations: (entries, deferred = carriedDeferred(entries)) =>
+        deferred
           ? null
           : turnAutomations(store.listAutomations(), store.getBots?.() ?? [], entries, {
               takes: (id, event) =>

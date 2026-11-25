@@ -37,7 +37,13 @@ export type ConnectorMachine = {
     deadlineAt?: number
   ) => Promise<boolean | 'expired'>
   /** The automations a bot's start or send also carries, run in that turn; null for none. */
-  turnAutomations?: (entries: readonly ConnectorTurnAutomation[]) => TurnAutomations | null
+  turnAutomations?: (
+    entries: readonly ConnectorTurnAutomation[],
+    // Whether they wait for the wake gate's trigger check instead; absent, decided now.
+    deferred?: boolean
+  ) => TurnAutomations | null
+  /** Whether a start or send's carried automations must come on their own, through the trigger gate. */
+  wakeGateDefers?: (entries: readonly ConnectorTurnAutomation[]) => boolean
   /** A send a bot thread's mute handles before the agent (accepted, no turn); null when it goes on
    *  now, 'send' when it goes on once its thread is linked. */
   threadMute?: (

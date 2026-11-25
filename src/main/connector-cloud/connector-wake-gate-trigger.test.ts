@@ -105,18 +105,24 @@ describe('a send that waits on its muted thread', () => {
     const wakeGate = vi.fn<NonNullable<DispatchMachine['wakeGate']>>(() => admitted)
     let decide: (step: 'send') => void = () => {}
     const decided = new Promise<'send'>((resolve) => (decide = resolve))
-    // At dispatch the carried automation is left to its trigger gate (null); asked again after the
-    // wait it would ride the turn, as if the gate had been turned off meanwhile.
-    const turnAutomations = vi
-      .fn<NonNullable<DispatchMachine['turnAutomations']>>()
-      .mockReturnValueOnce(null)
-      .mockReturnValue({ note: 'run the automation in this turn', record: async () => {} })
+    // At dispatch the carried automation is left to its trigger gate; asked again after the wait it
+    // would ride the turn, as if the gate had been turned off meanwhile.
+    const wakeGateDefers = vi
+      .fn<(entries: readonly unknown[]) => boolean>()
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    // Which automations apply, and their instructions, are still read when the send goes on.
+    const turnAutomations = vi.fn<NonNullable<DispatchMachine['turnAutomations']>>(
+      (_entries, deferred) =>
+        deferred ? null : { note: 'run the automation in this turn', record: async () => {} }
+    )
     const machine: DispatchMachine = {
       runTrigger: async () => false,
       wakeGate,
       turnAutomations,
       threadMute: () => ({ decided })
     }
+    Object.assign(machine, { wakeGateDefers })
     const send: Extract<ConnectorDelivery, { kind: 'send' }> = {
       kind: 'send',
       deliveryId: 'd1',
@@ -141,7 +147,8 @@ describe('a send that waits on its muted thread', () => {
     // Not asked again at redispatch: the admission handed to the seam is the dispatch-time one.
     expect(wakeGate).toHaveBeenCalledTimes(1)
     expect(calls.send.mock.calls[0]?.[0]).toMatchObject({ admit: admitted })
-    expect(turnAutomations).toHaveBeenCalledTimes(1)
+    expect(wakeGateDefers).toHaveBeenCalledTimes(1)
+    expect(turnAutomations).toHaveBeenCalledWith(expect.any(Array), true)
     expect(calls.send.mock.lastCall).not.toContainEqual(
       expect.objectContaining({ note: expect.anything() })
     )

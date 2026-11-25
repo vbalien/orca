@@ -372,4 +372,32 @@ describe('acks of a held delivery', () => {
       { deliveryId: expect.any(String), step: 'done', result: { outcome: 'accepted' } }
     ])
   })
+
+  it('answers a delivery whose deadline passed before its gate ran expired, done only', async () => {
+    const store = await home()
+    const decide = deciding(true)
+    const { seam, wakeGate } = connector(store, [bot()], decide)
+    const sent: unknown[] = []
+    const acks = new ConnectorDeliveryAcks({
+      seam,
+      host: HOST,
+      machine: { ...fakeMachine(() => null), wakeGate: wakeGate.wakeGate },
+      send: async (batch) => {
+        sent.push(...batch)
+        return null
+      },
+      helloRev: () => 1,
+      random: () => 0,
+      signal: new AbortController().signal,
+      outbox: () => 'account-1'
+    })
+    // Just enough time left to be taken, none left for its gate.
+    acks.deliverAll([start(FRESH)], () => 10_000)
+    await vi.waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent).toEqual([
+      { deliveryId: expect.any(String), step: 'done', result: { outcome: 'expired' } }
+    ])
+    expect(decide).not.toHaveBeenCalled()
+    expect(findLink(store, FRESH)).toBeNull()
+  })
 })
