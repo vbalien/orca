@@ -5,6 +5,7 @@ import type { SlackGateEvent } from '../../shared/bots/bot-slack-gate'
 import type { ConnectorAsker } from '../../shared/connector-asker-contract'
 import { decideSlackWake } from '../bots/slack-gate/slack-gate'
 import { TextBudget } from '../connector-cloud/connector-wake-gate-event'
+import { SLACK_GATE_CONTEXT_MARKER_TEXT as MARKER_TEXT } from '../../shared/bots/slack-gate-jev-request'
 import type { LocalSlackMessage } from './slack-local-events'
 
 /** Decides whether a message wakes the bot; anything but 'wake' posts nothing and starts nothing. */
@@ -13,12 +14,6 @@ export type LocalSlackWakeGate = (
   event: SlackGateEvent,
   options: { signal: AbortSignal; deadlineAt: number }
 ) => Promise<'wake' | 'block'>
-
-// Context markers carry text so every gate kind sees them; Jev reads only texts.
-const MARKER_TEXT = {
-  more: '(earlier messages in this thread are not shown)',
-  unreadable: '(this thread could not be read)'
-} as const
 
 /** The local message as the gate reads it. `historyUnknown`: a bare mention in a thread whose
  *  earlier messages weren't read whole, so what they asked before is unknown, not nothing.
@@ -51,6 +46,9 @@ export function localSlackGateEvent(input: {
         }
       : { kind: item.kind, text: budget.take(MARKER_TEXT[item.kind]) }
   )
+  const incomplete = asker.context.find(
+    (item) => item.kind === 'unreadable' || item.kind === 'more'
+  )?.kind
   return {
     eventId: message.eventId,
     case: message.case,
@@ -64,7 +62,10 @@ export function localSlackGateEvent(input: {
     mentioned: message.mentioned,
     ...(earlierOwn ? { earlierOwn } : {}),
     ...(context.length > 0 ? { context } : {}),
-    ...(input.truncated || budget.cut ? { truncated: true as const } : {})
+    ...(input.truncated || budget.cut ? { truncated: true as const } : {}),
+    ...(incomplete === 'more' || incomplete === 'unreadable'
+      ? { contextIncomplete: incomplete }
+      : {})
   }
 }
 

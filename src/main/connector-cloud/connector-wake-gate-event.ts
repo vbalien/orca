@@ -97,6 +97,9 @@ export function slackGateEventOf(
       : []
   )
   const messageTs = messageTsOf(asker)
+  const incomplete = asker?.context.find(
+    (item) => item.kind === 'unreadable' || item.kind === 'more'
+  )?.kind
   return {
     eventId: delivery.deliveryId,
     ...slackGateCaseOf(delivery, mentionsKnown),
@@ -134,6 +137,9 @@ export function slackGateEventOf(
       : {}),
     ...(delivery.kind === 'send' && delivery.mentioned ? { mentioned: true } : {}),
     ...(context.length ? { context } : {}),
-    ...(budget.cut ? { truncated: true as const } : {})
+    ...(budget.cut ? { truncated: true as const } : {}),
+    ...(incomplete === 'more' || incomplete === 'unreadable'
+      ? { contextIncomplete: incomplete }
+      : {})
   }
 }

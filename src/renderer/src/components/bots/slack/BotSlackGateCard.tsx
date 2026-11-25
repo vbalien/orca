@@ -1,6 +1,6 @@
 // "Check before waking": the bot's Slack wake gate, a command or TypeSafe Jev that decides whether a
 // Slack message or automation event wakes the bot. A section of its own in the Slack connector page.
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -14,7 +14,6 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { useTranslate } from '@/i18n/use-translate'
 import { refreshBotHost } from '@/lib/bot-catalog'
 import { callBotRpc } from '@/lib/bot-hosts'
@@ -23,11 +22,17 @@ import type { Bot } from '../../../../../shared/bot-types'
 import {
   BotSlackGateSchema,
   SLACK_GATE_CASES,
-  SLACK_GATE_DEFAULT_MODEL,
   SLACK_GATE_MAX_TIMEOUT_SECONDS,
   type BotSlackGate,
   type SlackGateCase
 } from '../../../../../shared/bots/bot-slack-gate'
+import { slackGateJevConfigOf } from '../../../../../shared/bots/slack-gate-jev-config'
+import {
+  formatSlackGateJevText,
+  parseSlackGateJevText
+} from '../../../../../shared/bots/slack-gate-jev-text'
+import { BotSlackGateJevEditor } from './jev/BotSlackGateJevEditor'
+import { saveSlackGate, SlackGateHostTooOldError } from './jev/slack-gate-save'
 import type { SlackGateKeyStatus } from '../../../../../shared/rpc-contract/bots-slack-gate-params'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
 import { BotConnectorSection } from '../bot-connector-people'
@@ -39,10 +44,14 @@ type Draft = {
   timeoutSeconds: number
   onError: BotSlackGate['onError']
   command: string
-  question: string
-  threshold: number
-  model: string
+  jevText: string
 }
+
+// A new gate starts as today's one question, written out as rules.
+const NEW_JEV = slackGateJevConfigOf({
+  question: 'Is this message a request this bot should answer?',
+  threshold: 0.5
+}).config
 
 function draftOf(gate: BotSlackGate | null | undefined): Draft {
   return {
@@ -52,9 +61,9 @@ function draftOf(gate: BotSlackGate | null | undefined): Draft {
     timeoutSeconds: gate?.timeoutSeconds ?? 10,
     onError: gate?.onError ?? 'wake',
     command: gate?.kind === 'command' ? gate.command : '',
-    question: gate?.kind === 'jev' ? gate.jev.question : '',
-    threshold: gate?.kind === 'jev' ? gate.jev.threshold : 0.5,
-    model: gate?.kind === 'jev' ? (gate.jev.model ?? '') : ''
+    jevText: formatSlackGateJevText(
+      gate?.kind === 'jev' ? slackGateJevConfigOf(gate.jev).config : NEW_JEV
+    )
   }
 }
 
@@ -65,18 +74,14 @@ function gateOf(draft: Draft): BotSlackGate | null {
     timeoutSeconds: draft.timeoutSeconds,
     onError: draft.onError
   }
+  const jev = draft.kind === 'jev' ? parseSlackGateJevText(draft.jevText) : null
+  if (jev && !jev.ok) {
+    return null
+  }
   const parsed = BotSlackGateSchema.safeParse(
     draft.kind === 'command'
       ? { ...common, kind: 'command', command: draft.command }
-      : {
-          ...common,
-          kind: 'jev',
-          jev: {
-            question: draft.question,
-            threshold: draft.threshold,
-            ...(draft.model.trim() ? { model: draft.model.trim() } : {})
-          }
-        }
+      : { ...common, kind: 'jev', jev: jev?.config }
   )
   return parsed.success ? parsed.data : null
 }
@@ -84,7 +89,7 @@ function gateOf(draft: Draft): BotSlackGate | null {
 /** Saves the gate (null removes it) on the bot's host, then reads its bots again. */
 async function saveGate(bot: Bot, gate: BotSlackGate | null): Promise<void> {
   try {
-    await callBotRpc(bot, 'bots.slackGate.set', { botId: bot.id, gate })
+    await saveSlackGate((method, params) => callBotRpc(bot, method, params), bot.id, gate)
   } finally {
     await refreshBotHost(bot.hostId)
   }
@@ -128,12 +133,18 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   }, [bot])
 
   const set = (patch: Partial<Draft>) => setDraft((before) => ({ ...before, ...patch }))
-  const gate = gateOf(draft)
+  // Parsed once per edit; the editor parses the same text for its messages.
+  const gate = useMemo(() => gateOf(draft), [draft])
   const failed = (error: unknown) =>
     toast.error(
-      error instanceof Error && error.message
-        ? error.message
-        : t('bots.slack.gate.saveFailed', 'Could not save the gate.')
+      error instanceof SlackGateHostTooOldError
+        ? t(
+            'bots.slack.gate.jev.hostTooOld',
+            'Update Orca on this bot’s computer to save Jev rules.'
+          )
+        : error instanceof Error && error.message
+          ? error.message
+          : t('bots.slack.gate.saveFailed', 'Could not save the gate.')
     )
   const save = (next: BotSlackGate | null) => {
     setSaving(true)
@@ -237,43 +248,11 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`${id}-question`}>
-              {t('bots.slack.gate.question', 'Question for Jev')}
-            </Label>
-            <Textarea
-              id={`${id}-question`}
-              value={draft.question}
-              placeholder={t(
-                'bots.slack.gate.questionPlaceholder',
-                'Is this message a request this bot should answer?'
-              )}
-              onChange={(event) => set({ question: event.target.value })}
+            <BotSlackGateJevEditor
+              text={draft.jevText}
+              botName={bot.name}
+              onChange={(jevText) => set({ jevText })}
             />
-            <div className="flex gap-2">
-              <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor={`${id}-threshold`}>
-                  {t('bots.slack.gate.threshold', 'Wake at or above')}
-                </Label>
-                <Input
-                  id={`${id}-threshold`}
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={draft.threshold}
-                  onChange={(event) => set({ threshold: Number(event.target.value) })}
-                />
-              </div>
-              <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor={`${id}-model`}>{t('bots.slack.gate.model', 'Model')}</Label>
-                <Input
-                  id={`${id}-model`}
-                  value={draft.model}
-                  placeholder={SLACK_GATE_DEFAULT_MODEL}
-                  onChange={(event) => set({ model: event.target.value })}
-                />
-              </div>
-            </div>
             <p className="leading-5 text-muted-foreground">
               {t('bots.slack.gate.typesafeNotice', 'Slack message text is sent to TypeSafe.')}
             </p>

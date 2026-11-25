@@ -4,11 +4,13 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { Bot } from '../../shared/bot-types'
 import type { SlackGateEvent } from '../../shared/bots/bot-slack-gate'
 import type { SlackWakeDecision } from '../bots/slack-gate/slack-gate'
-import { slackGateJevRequest } from '../bots/slack-gate/slack-gate-jev'
+import { slackGateJevRequest } from '../../shared/bots/slack-gate-jev-request'
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
 import { SlackLocalInbound } from './slack-local-inbound'
 import { slackLocalReads } from './slack-local-reads'
 import { localSlackWakeGate } from './slack-local-wake-gate'
+import { SlackGateDecider } from '../bots/slack-gate/slack-gate'
+import { askSlackGateJev } from '../bots/slack-gate/slack-gate-jev'
 
 type ThreadAnswer = { messages: { ts: string; user?: string; text: string }[]; has_more?: boolean }
 
@@ -172,7 +174,7 @@ it('says a bare mention’s earlier request is unknown when the thread wasn’t 
   expect(linked.methods).not.toContain('conversations.replies')
   expect(linked.calls).toEqual([{ kind: 'send', text: '(mentioned you with no message)' }])
   const event = linked.events[0]
-  expect(event && slackGateJevRequest(jev, event)).toMatchObject({
+  expect(event && slackGateJevRequest(jev, { name: 'Bot' }, event)).toMatchObject({
     state: { earlierOwn: { texts: [], incomplete: true } }
   })
 })
@@ -190,7 +192,7 @@ it('shows Jev that earlier thread messages were left out', async () => {
   const marker = '(earlier messages in this thread are not shown)'
   expect(event?.context?.[0]).toEqual({ kind: 'more', text: marker })
   expect(event?.context).toHaveLength(21)
-  const request = event && slackGateJevRequest(jev, event)
+  const request = event && slackGateJevRequest(jev, { name: 'Bot' }, event)
   expect(request).toMatchObject({
     state: { earlierMessages: [marker, ...others.slice(1).map((entry) => entry.text)] }
   })
@@ -229,4 +231,48 @@ it('drops a message whose check outlives the connection or its deadline, and goe
   wake(passed)
   await vi.advanceTimersByTimeAsync(0)
   expect(h.calls).toEqual([{ kind: 'start', text: 'two' }])
+})
+
+it('runs a Jev gate with rules through the real decider on the local path', async () => {
+  const bodies: { state: Record<string, unknown> }[] = []
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)))
+    return Response.json({ answers: { asks: { type: 'noul', noul: 0.3 } } })
+  })
+  const decider = new SlackGateDecider({
+    readKey: async () => 'k1',
+    now: Date.now,
+    askJev: (input) => askSlackGateJev({ ...input, fetch }),
+    runCommand: () => {
+      throw new Error('unused')
+    }
+  })
+  const bot = {
+    id: 'b1',
+    name: 'Elyang',
+    slackGate: {
+      on: true,
+      kind: 'jev' as const,
+      appliesTo: ['mention' as const],
+      timeoutSeconds: 5,
+      onError: 'wake' as const,
+      jev: {
+        questions: { asks: { type: 'noul' as const, instructions: 'Asks?' } },
+        send: { message: true, fromRole: true, mentioned: true },
+        rules: [{ question: 'asks', wakeIf: { atLeast: 0.7 } }]
+      }
+    }
+  }
+  const h = harness((event) => decider.decide(bot, event))
+  h.inbound.receive(envelope({ text: '<@U0BOT> hi' }))
+  await vi.waitFor(() => expect(h.events).toHaveLength(1))
+  await settled()
+  expect(h.calls).toEqual([])
+  expect(bodies).toEqual([
+    {
+      model: 'jev-latest',
+      state: { message: 'hi', fromRole: 'owner', mentioned: true },
+      questions: bot.slackGate.jev.questions
+    }
+  ])
 })
