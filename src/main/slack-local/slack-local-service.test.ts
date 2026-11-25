@@ -24,7 +24,9 @@ const keyring: SecretStore = {
 
 const TOKENS: Record<string, { team: string; user: string; app: string }> = {
   'xoxb-team-one-aaaaaaaaaa': { team: 'T1', user: 'U0BOT1', app: 'A1' },
-  'xoxb-team-two-bbbbbbbbbb': { team: 'T2', user: 'U0BOT2', app: 'A2' }
+  'xoxb-team-two-bbbbbbbbbb': { team: 'T2', user: 'U0BOT2', app: 'A2' },
+  // The first app's bot token, reissued.
+  'xoxb-team-one-rotated-dd': { team: 'T1', user: 'U0BOT1', app: 'A1' }
 }
 const APP_TOKEN = 'xapp-1-app-token-cccccccc'
 
@@ -33,16 +35,32 @@ function bot(id: string, extra: Partial<Bot> = {}): Bot {
   return { id, name: id, agent: 'claude', members: [], slack: null, ...extra } as unknown as Bot
 }
 
-function harness(bots: Bot[], failNextUpdate = false, helloApp: string | null = null) {
+type Post = { token: string; text: string }
+
+/** `helloApp`: the app Socket Mode's hello names; by default the bot token's own app, '' none. */
+function harness(
+  bots: Bot[],
+  failNextUpdate = false,
+  helloApp?: string,
+  postAnswers: Response[] = []
+) {
   const dir = mkdtempSync(join(tmpdir(), 'slack-local-service-'))
   dirs.push(dir)
   let failing = failNextUpdate
   const records = new Map(bots.map((entry) => [entry.id, entry]))
+  let lastApp: string | undefined
+  const posts: Post[] = []
   const fetch: typeof globalThis.fetch = async (url, init) => {
     const token = String(new Headers(init?.headers).get('authorization')).replace('Bearer ', '')
     // As Slack answers a bot token: auth.test names the bot, bots.info its app.
+    if (String(url).endsWith('chat.postMessage')) {
+      const text = new URLSearchParams(String(init?.body)).get('markdown_text') ?? ''
+      posts.push({ token, text })
+      return postAnswers.shift() ?? Response.json({ ok: true })
+    }
     if (String(url).endsWith('auth.test')) {
       const who = TOKENS[token]
+      lastApp = who?.app
       return Response.json(
         who
           ? { ok: true, team_id: who.team, team: 'Team', user_id: who.user, bot_id: `B${who.app}` }
@@ -90,7 +108,7 @@ function harness(bots: Bot[], failNextUpdate = false, helloApp: string | null = 
         if (event === 'message') {
           const hello = {
             type: 'hello',
-            ...(helloApp ? { connection_info: { app_id: helloApp } } : {})
+            ...((helloApp ?? lastApp) ? { connection_info: { app_id: helloApp ?? lastApp } } : {})
           }
           queueMicrotask(() => listener(Buffer.from(JSON.stringify(hello))))
         }
@@ -101,7 +119,7 @@ function harness(bots: Bot[], failNextUpdate = false, helloApp: string | null = 
     })
   } as unknown as SlackLocalServiceDeps
   const service = new SlackLocalService(deps)
-  return { service, tokens, records, runtime }
+  return { service, tokens, records, runtime, posts }
 }
 
 const local = (record: Bot | undefined) =>
@@ -125,7 +143,7 @@ it('saves tokens with their workspace, keeps the old pair when the record fails,
   await h.service.config.useLocal('b2')
   await expect(
     h.service.config.setTokens('b2', { botToken: 'xoxb-team-one-aaaaaaaaaa', appToken: APP_TOKEN })
-  ).rejects.toThrow('Another bot already uses this Slack app')
+  ).rejects.toThrow('slack_local:app_claimed')
   expect(await h.tokens.has('b2')).toBe(false)
 
   // The record can't be saved: the file goes back to the pair that worked.
@@ -225,10 +243,51 @@ it('leaves no tokens behind when the bot was deleted while its new tokens were b
 
 it('refuses a pair of tokens from two different apps before replacing anything', async () => {
   const h = harness([bot('b1')], false, 'A9')
+  const unnamed = harness([bot('b1')], false, '')
+  await unnamed.service.config.useLocal('b1')
+  await expect(
+    unnamed.service.config.setTokens('b1', {
+      botToken: 'xoxb-team-one-aaaaaaaaaa',
+      appToken: APP_TOKEN
+    })
+  ).rejects.toThrow('slack_local:app_unknown')
+  expect(await unnamed.tokens.has('b1')).toBe(false)
   await h.service.config.useLocal('b1')
   await expect(
     h.service.config.setTokens('b1', { botToken: 'xoxb-team-one-aaaaaaaaaa', appToken: APP_TOKEN })
-  ).rejects.toThrow('different Slack apps')
+  ).rejects.toThrow('slack_local:app_mismatch')
   expect(await h.tokens.has('b1')).toBe(false)
   expect(local(h.records.get('b1'))?.teamId).toBeUndefined()
+})
+
+it('keeps an answer waiting out a rate limit through a token change of the same app', async () => {
+  const h = harness([bot('b1')], false, undefined, [
+    new Response('', { status: 429, headers: { 'retry-after': '1' } })
+  ])
+  await h.service.config.useLocal('b1')
+  await h.service.config.setTokens('b1', {
+    botToken: 'xoxb-team-one-aaaaaaaaaa',
+    appToken: APP_TOKEN
+  })
+  h.service.deliver('b1', {
+    kind: 'turn-ended',
+    conversation: { source: 'slack-local', externalId: 'T1:C1:1800000000.000100:U0BOT1' },
+    worktreeId: 'wt',
+    paneKey: 'p',
+    turnId: 1,
+    stopReason: 'success',
+    at: 1,
+    origin: 'delivery',
+    lastAssistantMessage: 'done'
+  })
+  await vi.waitFor(() => expect(h.posts).toHaveLength(1))
+  // Reissued while the answer waits: it goes on with the new token, once.
+  await h.service.config.setTokens('b1', { botToken: 'xoxb-team-one-rotated-dd' })
+  await vi.waitFor(() => expect(h.posts).toHaveLength(2), { timeout: 4_000 })
+  expect(h.posts).toEqual([
+    { token: 'xoxb-team-one-aaaaaaaaaa', text: 'done' },
+    { token: 'xoxb-team-one-rotated-dd', text: 'done' }
+  ])
+  expect(await h.service.status('b1')).not.toHaveProperty('lastReplyError')
+  h.service.stop()
 })

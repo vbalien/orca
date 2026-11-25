@@ -208,7 +208,10 @@ it('answers a local delivery through the real seam after an Orca account reset, 
       posted.push(new URLSearchParams(String(init?.body)).get('markdown_text') ?? '')
       return Response.json({ ok: true })
     },
-    current: () => ({ botToken: 'xoxb-test', identity: { teamId: 'T2', botUserId: 'U0OWN' } }),
+    current: async () => ({
+      botToken: 'xoxb-test',
+      identity: { teamId: 'T2', botUserId: 'U0OWN' }
+    }),
     hostName: () => 'host',
     signal: new AbortController().signal,
     onError: () => {}

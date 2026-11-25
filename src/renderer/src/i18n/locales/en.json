@@ -30786,6 +30786,20 @@
       "reply": {
         "uncertain": "Slack didn't confirm the last answer. Check the thread before asking again.",
         "failed": "The last answer couldn't be posted ({{code}})."
+      },
+      "errors": {
+        "cloudAppPresent": "Remove this bot's Orca Cloud Slack app first (its Slack settings, Remove), then use your own app.",
+        "slackTriggers": "This bot has automations with Slack triggers, which don't run with your own Slack app yet. Remove their Slack triggers first.",
+        "notLocal": "This bot doesn't use your own Slack app.",
+        "noKeyring": "This computer has no OS keyring to seal Slack tokens with, so they were not saved.",
+        "botTokenFormat": "Paste the Bot User OAuth Token, which starts with xoxb-.",
+        "appTokenFormat": "Paste the App-Level Token, which starts with xapp-.",
+        "tokensRefused": "Slack didn't accept these tokens ({{code}}).",
+        "appUnknown": "Slack didn't say which app these tokens belong to, so they were not saved. Try again.",
+        "appMismatch": "The two tokens belong to different Slack apps. Paste both from the same app.",
+        "appClaimed": "Another bot already uses this Slack app. Each bot needs its own app.",
+        "noBot": "This bot no longer exists.",
+        "teamChanged": "The bot now uses another Slack workspace. Check the people again and retry."
       }
     }
   },

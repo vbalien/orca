@@ -22,14 +22,16 @@ type Prompt = Extract<ConversationEvent, { kind: 'prompt' }>
 
 export type SlackLocalRepliesDeps = {
   fetch: SlackFetch
-  /** The credentials loaded for the bot now; null once stopped. Read before every post. */
-  current: () => { botToken: string; identity: LocalSlackIdentity } | null
+  /** The bot's credentials once any reconnect settles; null when it has none. Read before every
+   *  post, so an answer waiting through a token change goes on with the new pair of the same app. */
+  current: () => Promise<{ botToken: string; identity: LocalSlackIdentity } | null>
   hostName: () => string
   signal: AbortSignal
   onError: (code: string) => void
   /** A whole answer was posted: a warning about an earlier one is out of date. */
   onDelivered?: () => void
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  now?: () => number
 }
 
 const sleepFor = (ms: number, signal: AbortSignal): Promise<void> => wait(ms, undefined, { signal })
@@ -51,6 +53,8 @@ export class SlackLocalReplies {
   private readonly notices = new BoundedKeys(2_000)
   private pending = 0
   private tail: Promise<void> = Promise.resolve()
+  // Slack's rate limit holds every later post too, even once an answer gave up.
+  private blockedUntil = 0
 
   constructor(private readonly deps: SlackLocalRepliesDeps) {}
 
@@ -120,10 +124,20 @@ export class SlackLocalReplies {
     // markdown_text where Slack takes it; plain text once if it refuses the field.
     let field: 'markdown_text' | 'text' = 'markdown_text'
     for (let attempt = 1; ; attempt++) {
-      const current = this.deps.current()
+      const cooldown = this.blockedUntil - this.now()
+      if (cooldown > 0 && !(await this.sleep(cooldown))) {
+        return false
+      }
+      const current = await this.deps.current()
+      if (this.deps.signal.aborted) {
+        return false
+      }
+      if (!current) {
+        this.deps.onError('not_connected')
+        return false
+      }
       // Only the app that was asked answers: new credentials for another app post nothing old.
       if (
-        !current ||
         current.identity.teamId !== place.teamId ||
         current.identity.botUserId !== place.botUserId
       ) {
@@ -146,6 +160,10 @@ export class SlackLocalReplies {
           field = 'text'
           continue
         }
+        if (failure.code === 'ratelimited') {
+          const until = this.now() + (failure.retryAfterMs ?? 1_000)
+          this.blockedUntil = Math.max(this.blockedUntil, until)
+        }
         const retry =
           attempt < MAX_TRIES &&
           (failure.delivery === 'not_sent' ||
@@ -154,13 +172,25 @@ export class SlackLocalReplies {
           this.deps.onError(failure.delivery === 'uncertain' ? 'reply_uncertain' : failure.code)
           return false
         }
-        const wait = failure.retryAfterMs ?? 2_000 * attempt
-        try {
-          await (this.deps.sleep ?? sleepFor)(wait, this.deps.signal)
-        } catch {
+        // A rate limit waits at the top of the loop; anything else backs off here.
+        if (failure.code !== 'ratelimited' && !(await this.sleep(2_000 * attempt))) {
           return false
         }
       }
     }
+  }
+
+  /** False when stopped while waiting. */
+  private async sleep(ms: number): Promise<boolean> {
+    try {
+      await (this.deps.sleep ?? sleepFor)(ms, this.deps.signal)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private now(): number {
+    return this.deps.now?.() ?? Date.now()
   }
 }

@@ -36,7 +36,8 @@ export type PhoneConnectorNeed = {
 function needPage(entry: PhoneConnectorEntry): ConnectorPage | null {
   switch (entry.kind) {
     case 'slack':
-      return { kind: 'slack', teamId: entry.teamId }
+      // The bot's own Slack app is fixed only on its computer.
+      return entry.key === 'slack-local' ? null : { kind: 'slack', teamId: entry.teamId }
     case 'linear':
       return { kind: 'linear', workspaceId: entry.linear.workspaceId }
     case 'github':

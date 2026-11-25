@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useTranslate } from '@/i18n/use-translate'
 import type { Bot } from '../../../../../shared/bot-types'
 import { useBotSlackLocal } from './use-bot-slack-local'
+import { slackLocalErrorText } from './slack-local-error-text'
 
 /** In an installed Orca Cloud workspace's body: which app it is, and how to change it. */
 export function BotSlackConnectionLine(): React.JSX.Element {
@@ -60,7 +61,9 @@ export function BotSlackUseOwnApp({
       >
         {t('bots.slackLocal.choose.button', 'Use my own Slack app')}
       </Button>
-      {local.error ? <p className="text-xs text-destructive">{local.error}</p> : null}
+      {local.error ? (
+        <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error)}</p>
+      ) : null}
     </div>
   )
 }

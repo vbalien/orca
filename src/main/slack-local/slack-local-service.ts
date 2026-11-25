@@ -1,7 +1,6 @@
 // Bots whose Slack runs through their own app on this computer: one Socket Mode connection each,
 // their messages into the conversation seam, and their answers back to the thread. Desktop only.
 import type { Bot } from '../../shared/bot-types'
-import type { LocalSlackPlace } from '../../shared/connectors/local-slack-conversation'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import { usesLocalSlack } from '../../shared/bots/bot-slack-connection'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
@@ -14,6 +13,7 @@ import { slackBotIdentity, SlackApiError, type SlackFetch } from './slack-web-ap
 import { repairLocalIdentity, SlackLocalConfig } from './slack-local-config'
 import { slackLocalConnection, type SlackLocalRunning } from './slack-local-connection'
 import { SlackLocalWatch } from './slack-local-watch'
+import { SlackLocalAnswers } from './slack-local-answers'
 import {
   slackLocalStatus,
   slackTriggerAutomations,
@@ -41,7 +41,6 @@ export type SlackLocalServiceDeps = {
   wakeGate?: LocalSlackWakeGate
 }
 
-const MAX_HELD = 50
 const AUTH_ERRORS = new Set(['invalid_auth', 'not_authed', 'token_revoked', 'account_inactive'])
 
 export class SlackLocalService {
@@ -55,8 +54,7 @@ export class SlackLocalService {
   private releaseBots: (() => void) | null = null
   private releaseSettings: (() => void) | undefined
   private restarting = new Map<string, Promise<void>>()
-  // Answers that finished while a bot's connection was being remade.
-  private readonly held = new Map<string, { place: LocalSlackPlace; event: ConversationEvent }[]>()
+  private readonly answers: SlackLocalAnswers
   // Bumped whenever a bot's connection is let go, so a load already under way doesn't connect.
   private readonly generations = new Map<string, number>()
   private known = new Set<string>()
@@ -65,10 +63,23 @@ export class SlackLocalService {
 
   constructor(private readonly deps: SlackLocalServiceDeps) {
     this.fetch = deps.fetch ?? globalThis.fetch
+    this.answers = new SlackLocalAnswers({
+      fetch: this.fetch,
+      credentials: (botId) => this.settledCredentials(botId),
+      onError: (botId, code) => {
+        this.replyErrors.set(botId, code)
+        this.changed()
+      },
+      onDelivered: (botId) => {
+        if (this.replyErrors.delete(botId)) {
+          this.changed()
+        }
+      }
+    })
     this.watch = new SlackLocalWatch({
       runtime: deps.runtime,
       store: deps.store,
-      deliver: (botId, place, event) => this.deliver(botId, place, event),
+      deliver: (botId, event) => this.deliver(botId, event),
       seamGone: () => this.reconcile()
     })
     this.config = new SlackLocalConfig({
@@ -80,6 +91,7 @@ export class SlackLocalService {
       host: {
         release: (botId) => {
           this.close(botId)
+          this.answers.drop(botId)
           this.problems.delete(botId)
           this.replyErrors.delete(botId)
         },
@@ -117,6 +129,7 @@ export class SlackLocalService {
     for (const botId of this.running.keys()) {
       this.close(botId)
     }
+    this.answers.keepOnly(new Set())
     this.watch.ensure(false)
   }
 
@@ -151,6 +164,7 @@ export class SlackLocalService {
         this.close(botId)
       }
     }
+    this.answers.keepOnly(wanted)
     for (const botId of wanted) {
       if (!this.running.has(botId) && !this.restarting.has(botId) && !this.problems.has(botId)) {
         void this.restart(botId)
@@ -166,7 +180,6 @@ export class SlackLocalService {
     const settled = next.finally(() => {
       if (this.restarting.get(botId) === settled) {
         this.restarting.delete(botId)
-        this.held.delete(botId)
         // A load let go meanwhile connected nothing: whatever is wanted now starts.
         queueMicrotask(() => this.reconcile())
       }
@@ -240,25 +253,12 @@ export class SlackLocalService {
           this.changed()
         }
       },
-      onReplyError: (code) => {
-        this.replyErrors.set(botId, code)
-        this.changed()
-      },
-      onReplyDelivered: () => {
-        if (this.replyErrors.delete(botId)) {
-          this.changed()
-        }
-      },
       ...(this.deps.wakeGate ? { wakeGate: this.deps.wakeGate } : {}),
       ...(this.deps.socketFactory ? { socketFactory: this.deps.socketFactory } : {})
     })
     this.running.set(botId, running)
     this.replyErrors.delete(botId)
     running.client.start()
-    // Answers that finished while it was remade go now, through the same app only.
-    const held = this.held.get(botId) ?? []
-    this.held.delete(botId)
-    held.forEach(({ place, event }) => this.deliver(botId, place, event))
     this.ensureWatch(true)
     this.changed()
   }
@@ -277,24 +277,26 @@ export class SlackLocalService {
     this.watch.ensure(wanted && !this.stopped)
   }
 
-  /** An answer for the bot's thread: to its connection, or held while that is being remade. */
-  private deliver(botId: string, place: LocalSlackPlace, event: ConversationEvent): void {
+  /** A local thread's event for its bot's answers (the watch's way in); they post once its
+   *  connection is (re)made. */
+  deliver(botId: string, event: ConversationEvent): void {
+    if (this.wants(this.bot(botId))) {
+      this.answers.observe(botId, event)
+    }
+  }
+
+  /** The bot's credentials once any reload under way settles; null when it isn't connected. */
+  private async settledCredentials(botId: string) {
+    for (let pending = this.restarting.get(botId); pending; pending = this.restarting.get(botId)) {
+      await pending.catch(() => undefined)
+    }
     const running = this.running.get(botId)
-    if (running) {
-      if (
-        place.teamId === running.secrets.teamId &&
-        place.botUserId === running.secrets.botUserId
-      ) {
-        running.replies.observe(event)
-      }
-      return
-    }
-    if (this.restarting.has(botId)) {
-      const held = this.held.get(botId) ?? []
-      if (held.length < MAX_HELD) {
-        this.held.set(botId, [...held, { place, event }])
-      }
-    }
+    return running
+      ? {
+          botToken: running.secrets.botToken,
+          identity: { teamId: running.secrets.teamId, botUserId: running.secrets.botUserId }
+        }
+      : null
   }
 
   private changed(): void {

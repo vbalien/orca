@@ -2,8 +2,7 @@
 // events go to the running connection of the bot that owns the thread, and to no other.
 import {
   isLocalSlackConversation,
-  parseLocalSlackConversation,
-  type LocalSlackPlace
+  parseLocalSlackConversation
 } from '../../shared/connectors/local-slack-conversation'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import {
@@ -20,8 +19,8 @@ export class SlackLocalWatch {
     private readonly deps: {
       runtime: Parameters<typeof runtimeConversationHost>[0]
       store: ExternalConversationLinkStore
-      /** A local thread's event for the bot whose thread it is, with the app the thread is in. */
-      deliver: (botId: string, place: LocalSlackPlace, event: ConversationEvent) => void
+      /** A local thread's event for the bot whose thread it is. */
+      deliver: (botId: string, event: ConversationEvent) => void
       /** The watched seam was disabled: watch the next one. */
       seamGone: () => void
     }
@@ -61,10 +60,9 @@ export class SlackLocalWatch {
     if (!isLocalSlackConversation(event.conversation)) {
       return
     }
-    const place = parseLocalSlackConversation(event.conversation.externalId)
     const botId = findLink(this.deps.store, event.conversation)?.link.bot?.botId
-    if (place && botId) {
-      this.deps.deliver(botId, place, event)
+    if (botId && parseLocalSlackConversation(event.conversation.externalId)) {
+      this.deps.deliver(botId, event)
     }
   }
 }

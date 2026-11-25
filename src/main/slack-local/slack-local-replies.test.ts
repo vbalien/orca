@@ -1,6 +1,6 @@
 // A final answer posts once: a part goes again only when Slack surely didn't take it, never after
 // the bot's app changed, and never with this computer's paths in it.
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import { SlackLocalReplies, splitAnswer } from './slack-local-replies'
 
@@ -19,12 +19,14 @@ const ended = (text: string, turnId = 5): ConversationEvent => ({
 
 type Answer = { status: number; body?: unknown; throws?: { code: string } }
 
-function harness(answers: Answer[]) {
+/** `autoWait`: waits end by themselves; otherwise `resume` ends the one under way. */
+function harness(answers: Answer[], autoWait = false) {
   const posted: string[] = []
   const errors: string[] = []
   const waits: number[] = []
   let identity = { teamId: 'T1', botUserId: 'U0BOT' }
   let release: (() => void) | null = null
+  let clock = 0
   const fetch: typeof globalThis.fetch = async (_url, init) => {
     const body = new URLSearchParams(String(init?.body))
     const answer = answers.shift() ?? { status: 200, body: { ok: true } }
@@ -42,13 +44,26 @@ function harness(answers: Answer[]) {
   }
   const replies = new SlackLocalReplies({
     fetch,
-    current: () => ({ botToken: 'xoxb-test', identity }),
+    current: async () => ({ botToken: 'xoxb-test', identity }),
     hostName: () => 'host',
     signal: new AbortController().signal,
     onError: (code) => errors.push(code),
+    now: () => clock,
     sleep: (ms) => {
       waits.push(ms)
-      return new Promise((resolve) => (release = () => resolve()))
+      const end = (): void => {
+        clock += ms
+      }
+      if (autoWait) {
+        end()
+        return Promise.resolve()
+      }
+      return new Promise((resolve) => {
+        release = () => {
+          end()
+          resolve()
+        }
+      })
     }
   })
   return {
@@ -101,4 +116,14 @@ it('drops what is left once the botâ€™s app changed, and redacts this computerâ€
   await flush()
   expect(paths.posted).toHaveLength(1)
   expect(paths.posted[0]).not.toContain('/home/alice')
+})
+
+it('keeps waiting out a rate limit for the next answer after one gave up', async () => {
+  const h = harness([{ status: 429 }, { status: 429 }, { status: 429 }], true)
+  h.replies.observe(ended('first', 1))
+  h.replies.observe(ended('second', 2))
+  await vi.waitFor(() => expect(h.posted).toEqual(['second']))
+  expect(h.errors).toEqual(['ratelimited'])
+  // Two retries of the first, then the second still waits out the third limit before it posts.
+  expect(h.waits).toEqual([120_000, 120_000, 120_000])
 })

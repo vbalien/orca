@@ -35,7 +35,9 @@ export function localSlackGateEvent(input: {
   const earlierOwn = asker.earlierOwn
     ? {
         texts: asker.earlierOwn.messages.map((entry) => budget.take(entry.text)),
-        ...(asker.earlierOwn.more ? { incomplete: true as const } : {})
+        ...(asker.earlierOwn.more || asker.earlierOwn.messages.some((entry) => entry.cut)
+          ? { incomplete: true as const }
+          : {})
       }
     : input.historyUnknown
       ? { texts: [], incomplete: true as const }

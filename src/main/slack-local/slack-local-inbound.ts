@@ -299,7 +299,9 @@ export class SlackLocalInbound {
     return {
       messages: kept.map((entry) => ({
         text: cap(entry.text),
-        at: Math.round(Number(entry.ts) * 1000)
+        at: Math.round(Number(entry.ts) * 1000),
+        // The agent is told a cut request is incomplete.
+        ...(entry.text.length > TEXT_CAP ? { cut: true as const } : {})
       })),
       ...(own.length > kept.length ? { more: true as const } : {})
     }

@@ -1,10 +1,9 @@
-// One bot's live link to its own Slack app: Socket Mode in, the conversation seam, answers out.
-import { hostname } from 'node:os'
+// One bot's live link to its own Slack app: Socket Mode in, into the conversation seam. Answers go
+// out through the bot's SlackLocalReplies, which outlives a reconnect.
 import type { Bot } from '../../shared/bot-types'
 import { runtimeConversationHost } from '../external-conversations/external-conversation-runtime-host'
 import { SlackLocalInbound } from './slack-local-inbound'
 import { slackLocalReads } from './slack-local-reads'
-import { SlackLocalReplies } from './slack-local-replies'
 import { localSlackWakeGate, type LocalSlackWakeGate } from './slack-local-wake-gate'
 import type { SlackLocalSecrets } from './slack-local-token-store'
 import {
@@ -19,7 +18,6 @@ export type SlackLocalRunning = {
   abort: AbortController
   client: SlackSocketModeClient
   inbound: SlackLocalInbound
-  replies: SlackLocalReplies
   state: SocketModeState
 }
 
@@ -28,11 +26,9 @@ export function slackLocalConnection(input: {
   fetch: SlackFetch
   runtime: Parameters<typeof runtimeConversationHost>[0]
   bot: () => Bot | null
-  /** Whether this connection is still the bot's; a replaced one posts nothing more. */
+  /** Whether this connection is still the bot's; a replaced one reports nothing more. */
   isCurrent: (abort: AbortController) => boolean
   onState: (state: SocketModeState) => void
-  onReplyError: (code: string) => void
-  onReplyDelivered: () => void
   wakeGate?: LocalSlackWakeGate
   socketFactory?: (url: string) => SocketModeSocket
 }): SlackLocalRunning {
@@ -48,14 +44,6 @@ export function slackLocalConnection(input: {
     wakeGate: input.wakeGate ?? localSlackWakeGate(),
     signal: abort.signal
   })
-  const replies = new SlackLocalReplies({
-    fetch: input.fetch,
-    current: () => (input.isCurrent(abort) ? { botToken: secrets.botToken, identity } : null),
-    hostName: () => hostname(),
-    signal: abort.signal,
-    onError: input.onReplyError,
-    onDelivered: input.onReplyDelivered
-  })
   const client = new SlackSocketModeClient({
     appToken: secrets.appToken,
     appId: secrets.appId,
@@ -68,5 +56,5 @@ export function slackLocalConnection(input: {
     },
     ...(input.socketFactory ? { socketFactory: input.socketFactory } : {})
   })
-  return { secrets, abort, client, inbound, replies, state: { state: 'connecting' } }
+  return { secrets, abort, client, inbound, state: { state: 'connecting' } }
 }

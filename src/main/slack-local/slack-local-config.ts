@@ -12,11 +12,19 @@ import {
   type SlackLocalSecrets,
   type SlackLocalTokenStore
 } from './slack-local-token-store'
-import { LOCAL_SLACK_TRIGGER_REFUSAL } from './slack-local-trigger-policy'
+import {
+  slackLocalErrorMessage,
+  type SlackLocalErrorCode
+} from '../../shared/bots/slack-local-errors'
 import { slackBotIdentity, SlackApiError, type SlackFetch } from './slack-web-api'
 import { socketModeAppId, type SocketModeSocket } from './slack-socket-mode-client'
 
-export class SlackLocalConfigError extends Error {}
+export class SlackLocalConfigError extends Error {
+  constructor(code: SlackLocalErrorCode, detail?: string) {
+    super(slackLocalErrorMessage(code, detail))
+    this.name = 'SlackLocalConfigError'
+  }
+}
 
 export type SlackLocalConfigDeps = {
   runtime: Pick<OrcaRuntimeService, 'bots' | 'getConnectorCloud'>
@@ -57,12 +65,10 @@ export class SlackLocalConfig {
       return
     }
     if ((bot.slackApps?.length ?? 0) > 0 || bot.slack) {
-      throw new SlackLocalConfigError(
-        "Remove this bot's Orca Cloud Slack app first (its Slack settings, Remove), then use your own app."
-      )
+      throw new SlackLocalConfigError('cloud_app_present')
     }
     if (slackTriggerAutomations(this.deps.store, botId).length > 0) {
-      throw new SlackLocalConfigError(LOCAL_SLACK_TRIGGER_REFUSAL)
+      throw new SlackLocalConfigError('slack_triggers')
     }
     // Signed in, the cloud says whether an app exists that this computer hasn't recorded.
     const cloud = this.deps.runtime.getConnectorCloud()
@@ -72,14 +78,12 @@ export class SlackLocalConfig {
       if (
         states.some((entry) => entry.state !== 'not_created' && entry.state !== 'grant_expired')
       ) {
-        throw new SlackLocalConfigError(
-          'Orca Cloud still has a Slack app for this bot. Remove it in its Slack settings first.'
-        )
+        throw new SlackLocalConfigError('cloud_app_present')
       }
     }
     await this.deps.runtime.bots.update(botId, (current) => {
       if ((current.slackApps?.length ?? 0) > 0 || current.slack) {
-        throw new SlackLocalConfigError("Remove this bot's Orca Cloud Slack app first.")
+        throw new SlackLocalConfigError('cloud_app_present')
       }
       return { slackConnection: { mode: 'local' } }
     })
@@ -103,20 +107,19 @@ export class SlackLocalConfig {
   async setTokens(botId: string, given: { botToken?: string; appToken?: string }): Promise<void> {
     const bot = this.requireBot(botId)
     if (!usesLocalSlack(bot)) {
-      throw new SlackLocalConfigError('Choose your own Slack app for this bot first.')
+      throw new SlackLocalConfigError('not_local')
     }
-    const refusal = this.deps.tokens.sealingRefusal()
-    if (refusal) {
-      throw new SlackLocalConfigError(refusal)
+    if (this.deps.tokens.sealingRefusal()) {
+      throw new SlackLocalConfigError('no_keyring')
     }
     const saved = await this.deps.tokens.read(botId).catch(() => null)
     const botToken = given.botToken?.trim() || saved?.botToken
     const appToken = given.appToken?.trim() || saved?.appToken
     if (!botToken || !isSlackBotToken(botToken)) {
-      throw new SlackLocalConfigError('Paste the Bot User OAuth Token, which starts with xoxb-.')
+      throw new SlackLocalConfigError('bot_token_format')
     }
     if (!appToken || !isSlackAppToken(appToken)) {
-      throw new SlackLocalConfigError('Paste the App-Level Token, which starts with xapp-.')
+      throw new SlackLocalConfigError('app_token_format')
     }
     let identity: Awaited<ReturnType<typeof slackBotIdentity>>
     let socketAppId: string | null
@@ -125,15 +128,16 @@ export class SlackLocalConfig {
       socketAppId = await socketModeAppId(this.deps.fetch, appToken, this.deps.socketFactory)
     } catch (error) {
       throw new SlackLocalConfigError(
-        `Slack didn't accept these tokens (${error instanceof SlackApiError ? error.code : 'network'}).`
+        'tokens_refused',
+        error instanceof SlackApiError ? error.code : 'network'
       )
     }
-    if (!identity.appId) {
-      throw new SlackLocalConfigError("Slack didn't say which app this bot token belongs to.")
+    // Both tokens must be surely the same app's, checked before either replaces what works.
+    if (!identity.appId || !socketAppId) {
+      throw new SlackLocalConfigError('app_unknown')
     }
-    // Both tokens must be the same app's, checked before either replaces what works.
-    if (socketAppId !== null && socketAppId !== identity.appId) {
-      throw new SlackLocalConfigError('The two tokens belong to different Slack apps.')
+    if (socketAppId !== identity.appId) {
+      throw new SlackLocalConfigError('app_mismatch')
     }
     const secrets: SlackLocalSecrets = {
       botToken,
@@ -143,19 +147,17 @@ export class SlackLocalConfig {
       appId: identity.appId
     }
     if (claimedByAnother(this.deps.runtime.bots.list(), botId, secrets)) {
-      throw new SlackLocalConfigError(
-        'Another bot already uses this Slack app. Each bot needs its own app.'
-      )
+      throw new SlackLocalConfigError('app_claimed')
     }
     const previous = await this.deps.tokens.readSealed(botId)
     await this.deps.tokens.write(botId, secrets)
     try {
       await this.deps.runtime.bots.update(botId, (current) => {
         if (!usesLocalSlack(current)) {
-          throw new SlackLocalConfigError('This bot no longer uses its own Slack app.')
+          throw new SlackLocalConfigError('not_local')
         }
         if (claimedByAnother(this.deps.runtime.bots.list(), botId, secrets)) {
-          throw new SlackLocalConfigError('Another bot already uses this Slack app.')
+          throw new SlackLocalConfigError('app_claimed')
         }
         return identityUpdate(current, secrets, identity.teamName)
       })
@@ -197,7 +199,7 @@ export class SlackLocalConfig {
   private requireBot(botId: string): Bot {
     const bot = this.deps.runtime.bots.list().find((entry) => entry.id === botId)
     if (!bot) {
-      throw new SlackLocalConfigError('No such bot.')
+      throw new SlackLocalConfigError('no_bot')
     }
     return bot
   }
