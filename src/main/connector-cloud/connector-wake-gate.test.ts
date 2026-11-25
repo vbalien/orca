@@ -400,4 +400,46 @@ describe('acks of a held delivery', () => {
     expect(decide).not.toHaveBeenCalled()
     expect(findLink(store, FRESH)).toBeNull()
   })
+
+  it('holds a blocked batch, and replays it after a restart without deciding again', async () => {
+    const store = await home()
+    const acked = async (decide: typeof decideSlackWake, raws: unknown[]) => {
+      const { seam, wakeGate } = connector(store, [bot()], decide)
+      const sent: unknown[] = []
+      const acks = new ConnectorDeliveryAcks({
+        seam,
+        host: HOST,
+        machine: { ...fakeMachine(() => null), wakeGate: wakeGate.wakeGate },
+        send: async (batch) => {
+          sent.push(...batch)
+          return null
+        },
+        helloRev: () => 1,
+        random: () => 0,
+        signal: new AbortController().signal,
+        outbox: () => 'account-1'
+      })
+      acks.deliverAll(raws, () => 60_000)
+      await vi.waitFor(() => expect(sent).toHaveLength(raws.length))
+      return sent
+    }
+    const head = start(FRESH)
+    // The same person's reply right behind it: one turn, one verdict.
+    const follower = send(FRESH, { asker: { ...asker('1800000000.000600'), userId: 'U1' } })
+    const doneOnly = [
+      { deliveryId: head.deliveryId, step: 'done', result: { outcome: 'accepted' } },
+      { deliveryId: follower.deliveryId, step: 'done', result: { outcome: 'accepted' } }
+    ]
+    const decide = deciding(false)
+    // Done only, in any order: never a `received` for a request nothing took.
+    expect(await acked(decide, [head, follower])).toEqual(expect.arrayContaining(doneOnly))
+    expect(decide).toHaveBeenCalledTimes(1)
+
+    orchestration.close()
+    orchestration = new OrchestrationDb(join(testState.dir, 'orchestration.db'))
+    const again = deciding(true)
+    expect(await acked(again, [head, follower])).toEqual(expect.arrayContaining(doneOnly))
+    expect(again).not.toHaveBeenCalled()
+    expect(findLink(store, FRESH)).toBeNull()
+  })
 })
