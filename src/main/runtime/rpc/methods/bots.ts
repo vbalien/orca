@@ -38,6 +38,7 @@ import { defineMethod, InvalidArgumentError, type RpcContext } from '../core'
 import { botSkillProjectViews, relinkBotSkills } from '../../../bots/bot-skill-projects'
 import { botOwnSkillsView, linkBotOwnSkills } from '../../../bots/bot-own-skills'
 import { botHomeFolder } from '../../../bots/bot-home'
+import { refuseLocalSlackMemberAdds } from '../../../slack-local/slack-local-members'
 import { listedBotsFacts } from './bots-list-facts'
 import { normalizeBotSidebarView } from '../../../../shared/bots/bot-sidebar-view'
 import { OWNER_ACTS_FOR } from '../../../../shared/bots/bot-acts-for'
@@ -53,7 +54,11 @@ async function updateBot(params: BotUpdateParams, context: RpcContext) {
   if (members !== undefined || added !== undefined || permissionMode !== undefined) {
     ownerOnly(context, 'Only your owner changes your Who can ask or permissions, in Orca.')
   }
-  const bot = await context.runtime.bots.update(params.botId, params.updates)
+  // Checked against the record being changed, inside the update queue.
+  const bot = await context.runtime.bots.update(params.botId, (current) => {
+    refuseLocalSlackMemberAdds(current, params.updates)
+    return params.updates
+  })
   if (params.updates.skillProjects !== undefined) {
     relinkBotSkills(bot, context.runtime.listRepos())
   }

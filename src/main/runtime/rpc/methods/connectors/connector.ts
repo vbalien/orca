@@ -1,5 +1,7 @@
 /** connector.* conversation handlers act on this host's seam, regardless of caller. */
 
+import { isLocalSlackConversation } from '../../../../../shared/connectors/local-slack-conversation'
+import { LOCAL_SLACK_ACTION_REFUSAL } from '../../../../slack-local/slack-local-action-policy'
 import {
   cloudConversation,
   CONNECTOR_REPLIES_OUTBOX_FEATURE
@@ -39,6 +41,10 @@ export const CONNECTOR_METHODS = [
       const target = requireSeam(context.runtime).replyTarget(paneKey)
       if (!target) {
         throw new Error('not_a_cloud_conversation')
+      }
+      // A bot's own Slack app's thread gets its final message from this computer, never the cloud.
+      if (isLocalSlackConversation(target.key)) {
+        throw new Error(LOCAL_SLACK_ACTION_REFUSAL)
       }
       // A bot posts only into the conversation its chat is bound to, as that bot.
       const botRefusal = botReplyRefusal(

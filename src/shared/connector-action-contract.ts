@@ -147,6 +147,8 @@ export type ConnectorActionResponse = z.infer<typeof ConnectorActionResponse>
 /** Why `connector.act` refused before the cloud acted; the cloud's own refusals come back as results. */
 export const CONNECTOR_ACT_ERROR_CODES = [
   'not_a_bot_session',
+  // The bot answers Slack through its own app on this computer; this action would reach Orca Cloud.
+  'local_slack_unsupported',
   'connector_not_connected',
   'cloud_lacks_actions',
   'cloud_lacks_places',

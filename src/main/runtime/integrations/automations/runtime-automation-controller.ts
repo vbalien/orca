@@ -1,4 +1,5 @@
 import { hostQualifiedRepoSelector } from '../../workspaces/catalog/runtime-repo-selector'
+import { refuseLocalSlackTriggers } from '../../../slack-local/slack-local-trigger-policy'
 import { parseExecutionHostId } from '../../../../shared/execution-host/execution-host'
 import type { AutomationService } from '../../../automations/automation-service'
 import type {
@@ -158,6 +159,7 @@ export class RuntimeAutomationController {
       throw new Error('Session reuse requires an existing workspace target.')
     }
     const { on: rules, bot: botTarget } = await botAutomationCreateRules(this, bot, input)
+    refuseLocalSlackTriggers(bot, rules)
     const chosen = destination ?? input.destination
     return await this.webhooks.save(bot && { botId: bot.id }, rules, async (on, id) => {
       assertAutomationBotAtWrite(store, botTarget)
@@ -221,6 +223,11 @@ export class RuntimeAutomationController {
     assertThreadReplies(this.takesThreadReplies, updates.bot, current)
     if (current.bot) {
       await patchBotAutomationUpdate(this, store, { ...current, bot: current.bot }, updates, patch)
+      const botId = current.bot.botId
+      refuseLocalSlackTriggers(
+        store.getBots?.().find((entry) => entry.id === botId),
+        patch.enabled === false ? undefined : (patch.on ?? (patch.enabled ? current.on : undefined))
+      )
     }
     let resolvedRepo: Repo | undefined
     if (targetChanged) {

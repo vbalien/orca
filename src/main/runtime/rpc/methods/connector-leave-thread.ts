@@ -2,6 +2,8 @@
 // answers, until someone @mentions it. Orca decides which bot, which thread and whether this turn
 // may, from its own records; the agent names nothing. The thread is then owed Orca's own
 // confirmation, saved with the mute, which the turn's end posts.
+import { isLocalSlackConversation } from '../../../../shared/connectors/local-slack-conversation'
+import { LOCAL_SLACK_ACTION_REFUSAL } from '../../../slack-local/slack-local-action-policy'
 import type { ConnectorConversation } from '../../../../shared/connectors/connector-cloud-contract'
 import { ConnectorLeaveThread } from '../../../../shared/rpc-contract/connectors/connector-params'
 import { botOfSession } from '../../../bots/bot-session-tabs'
@@ -57,8 +59,15 @@ export const CONNECTOR_LEAVE_THREAD_METHOD = defineMethod({
     }
     const seam = runtime.getExternalConversationSeam()
     const target = seam?.replyTarget(chatPaneKey(sessionId)) ?? null
-    const key = target?.key
-    if (!seam || !key || key.source !== 'slack' || !slackThreadBotUser(key.externalId)) {
+    if (isLocalSlackConversation(target?.key)) {
+      throw new ConnectorActError('local_slack_unsupported', LOCAL_SLACK_ACTION_REFUSAL)
+    }
+    // Only Orca Cloud's Slack threads: a bot's own Slack app's are slack-local.
+    const key =
+      target?.key.source === 'slack'
+        ? { source: 'slack' as const, externalId: target.key.externalId }
+        : undefined
+    if (!seam || !target || !key || !slackThreadBotUser(key.externalId)) {
       throw new ConnectorActError('not_a_thread', NOT_A_THREAD)
     }
     // Only an @mention brings it back: never leave where the cloud can't say there was one.

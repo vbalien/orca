@@ -1,7 +1,8 @@
 import type { NativeChatAgent } from '../agent-launch/permissions/agent-chat-permission-support'
 
-/** Where a connector conversation comes from. */
-export const CONNECTOR_SOURCES = ['slack', 'github', 'linear', 'discord'] as const
+/** Where a connector conversation comes from. `slack-local`: a bot's own Slack app this computer
+ *  talks to directly; Orca Cloud's contract has no such source, so it never names one. */
+export const CONNECTOR_SOURCES = ['slack', 'github', 'linear', 'discord', 'slack-local'] as const
 export type ConnectorSource = (typeof CONNECTOR_SOURCES)[number]
 
 /** How agent-facing text names where a conversation comes from. */
@@ -9,7 +10,8 @@ export const CONNECTOR_SOURCE_NAMES: Record<ConnectorSource, string> = {
   slack: 'Slack',
   github: 'GitHub',
   linear: 'Linear',
-  discord: 'Discord'
+  discord: 'Discord',
+  'slack-local': 'Slack'
 }
 
 /** Where a conversation's replies land, as a bot reads it: "the Slack thread in #orca", "ENG-42 on Linear". */
@@ -18,7 +20,7 @@ export function conversationPlaceText(link: { source: ConnectorSource; place?: s
   if (!link.place) {
     return `the ${source} conversation that woke you`
   }
-  return link.source === 'slack' || link.source === 'discord'
+  return link.source === 'slack' || link.source === 'slack-local' || link.source === 'discord'
     ? `the ${source} thread in ${link.place}`
     : `${link.place} on ${source}`
 }

@@ -94,6 +94,7 @@ function context(callerSessionId?: string) {
   return {
     runtime: {
       bots: { enabled: () => true },
+      requireStore: () => ({ getRepos: () => [], getAllWorktreeMeta: () => ({}) }),
       lookAround: { botOfTidyUp: () => null, botOfLook: () => null },
       getConnectorCloud: () => ({
         cloudFeatures: () => new Set(['actions']),

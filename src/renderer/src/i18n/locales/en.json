@@ -30716,6 +30716,77 @@
         "expired": "The sign-in expired. Try again.",
         "couldNotSignIn": "Couldn’t sign in. Try again."
       }
+    },
+    "slackLocal": {
+      "connection": {
+        "orca": "Connected through Orca Cloud’s Slack app. To use your own Slack app on this computer instead, remove this one first, then add Slack again."
+      },
+      "chosen": "Open Slack in {{name}}’s Connectors to finish setting it up.",
+      "choose": {
+        "help": "Or use a Slack app you make yourself. This computer talks to it directly, so messages don’t go through Orca Cloud.",
+        "button": "Use my own Slack app"
+      },
+      "state": {
+        "connectedTo": "Your own app in {{place}}, on this computer",
+        "connected": "Your own app, on this computer",
+        "needsTokens": "Paste your Slack app’s tokens",
+        "setUp": "Set up",
+        "error": "Slack refused the connection ({{code}})",
+        "errorLabel": "Not connected",
+        "connecting": "Connecting to Slack…",
+        "replyProblem": "Answer not posted",
+        "paused": "Not listening: the bot is paused or bots are off"
+      },
+      "switchBack": {
+        "title": "Use Orca Cloud’s Slack app for {{name}}?",
+        "note": "This computer stops listening to your own app and forgets its tokens and the people added for it. Then add Slack again from Connectors.",
+        "confirm": "Switch",
+        "menu": "Switch to Orca Cloud’s Slack app…"
+      },
+      "name": "Slack (your own app)",
+      "tokens": {
+        "saved": "Saved. Connecting to Slack…",
+        "noKeyring": "This computer can't seal tokens with an OS keyring, so they can't be saved: {{reason}}",
+        "bot": "Bot User OAuth Token",
+        "savedPlaceholder": "Saved — paste to replace",
+        "app": "App-Level Token",
+        "save": "Save tokens",
+        "title": "Tokens",
+        "botPlaceholder": "xoxb-…",
+        "appPlaceholder": "xapp-…"
+      },
+      "owner": {
+        "label": "Your Slack member ID",
+        "help": "In Slack, open your profile, choose ⋯ and Copy member ID. Your requests act as you.",
+        "save": "Save",
+        "placeholder": "U0123ABCD"
+      },
+      "askers": {
+        "remove": "Remove {{name}}",
+        "none": "Only you can ask, once your member ID is saved.",
+        "add": "Add people by Slack member ID",
+        "addButton": "Add",
+        "placeholder": "U0123ABCD, U0456EFGH"
+      },
+      "manifest": {
+        "copied": "Manifest copied",
+        "copyFailed": "Couldn't copy the manifest",
+        "copy": "Copy manifest"
+      },
+      "app": {
+        "title": "Your Slack app",
+        "help": "Create an app at api.slack.com/apps from this manifest, install it to your workspace, then paste its two tokens below. Slack messages go straight between Slack and this computer.",
+        "botTokenStep": "Bot User OAuth Token (xoxb-): OAuth & Permissions, after installing the app.",
+        "appTokenStep": "App-Level Token (xapp-): Basic Information → App-Level Tokens, with the connections:write scope."
+      },
+      "access": {
+        "title": "Who can ask"
+      },
+      "triggers": "These automations have Slack triggers, which don't run with your own app yet: {{names}}",
+      "reply": {
+        "uncertain": "Slack didn't confirm the last answer. Check the thread before asking again.",
+        "failed": "The last answer couldn't be posted ({{code}})."
+      }
     }
   },
   "plugins": {
