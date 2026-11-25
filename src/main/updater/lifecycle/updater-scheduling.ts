@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { forkBuild, forkUpdatesOffField, updaterActive } from '../fork-updates'
 import { isMacInstallRequested } from '../mac-install/updater-mac-install'
 import { withUpdaterSpan } from '../../observability/instrumentation'
 import {
@@ -12,6 +12,14 @@ import { UpdaterCheckFailure } from './updater-check-failure'
 import { getDelayedUpdateWakeDelayMs } from '../releases/updater-release-delay'
 
 export abstract class UpdaterScheduling extends UpdaterCheckFailure {
+  /** Whether this build updates itself. A fork build does not, and says so from launch (fork-updates.ts). */
+  protected selfUpdateAllowed(): boolean {
+    if (!updaterActive() && forkBuild()) {
+      this.sendStatus({ state: 'not-available', forkUpdatesOff: true })
+    }
+    return updaterActive()
+  }
+
   protected getAutomaticRetryInterval(): number {
     return AUTO_UPDATE_RETRY_INTERVAL_MS
   }
@@ -75,8 +83,8 @@ export abstract class UpdaterScheduling extends UpdaterCheckFailure {
     ) {
       return false
     }
-    if (!app.isPackaged) {
-      this.sendStatus({ state: 'not-available' })
+    if (!updaterActive()) {
+      this.sendStatus({ state: 'not-available', ...forkUpdatesOffField() })
       return false
     }
     this.teamPolicyCheckPending = false

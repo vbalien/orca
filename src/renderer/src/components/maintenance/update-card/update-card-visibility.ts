@@ -53,7 +53,12 @@ export function getUpdateCardAriaLabel(status: UpdateStatus, t: Translate = tran
     case 'checking':
       return t('auto.components.UpdateCard.aria.statusChecking', 'Checking for updates')
     case 'not-available':
-      return t('auto.components.UpdateCard.aria.statusLatest', "You're on the latest version")
+      return status.forkUpdatesOff
+        ? t(
+            'forkBuild.updatesOff',
+            'Self-update is off in this fork build. Get new versions from github.com/vbalien/orca/releases.'
+          )
+        : t('auto.components.UpdateCard.aria.statusLatest', "You're on the latest version")
     case 'available':
       return t('auto.components.UpdateCard.aria.statusAvailable', 'Update available')
     case 'downloading':
