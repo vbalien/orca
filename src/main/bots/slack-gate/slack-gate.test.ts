@@ -183,13 +183,17 @@ describe('SlackGateDecider', () => {
     expect(most).toBe(2)
   })
 
-  it('bounds a stalled key read by the timeout and never launches after it', async () => {
+  it('bounds a stalled key read by the timeout and never launches once the key arrives late', async () => {
     vi.useFakeTimers()
-    const { decider: gate, started } = decider([], { readKey: () => new Promise(() => {}) })
+    let keyArrives: (key: string | null) => void = () => {}
+    const key = new Promise<string | null>((resolve) => (keyArrives = resolve))
+    const { decider: gate, started } = decider([], { readKey: () => key })
     const bot = { id: 'b', name: 'B', slackGate: command({ timeoutSeconds: 1, onError: 'block' }) }
     const decided = gate.decide(bot, event())
     await vi.advanceTimersByTimeAsync(3_000)
     expect(await decided).toMatchObject({ verdict: 'block', reason: 'error', timedOut: true })
+    keyArrives('k1')
+    await vi.advanceTimersByTimeAsync(10)
     expect(started).toHaveLength(0)
   })
 

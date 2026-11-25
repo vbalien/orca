@@ -98,6 +98,37 @@ describe('carried automations', () => {
   })
 })
 
+describe('a send that waits on its muted thread', () => {
+  it('keeps the wake gate its dispatch saw when it goes on', async () => {
+    const { seam, calls } = fakeSeam()
+    const admitted = vi.fn(async () => null)
+    const wakeGate = vi.fn<NonNullable<DispatchMachine['wakeGate']>>(() => admitted)
+    let decide: (step: 'send') => void = () => {}
+    const decided = new Promise<'send'>((resolve) => (decide = resolve))
+    const machine: DispatchMachine = {
+      runTrigger: async () => false,
+      wakeGate,
+      threadMute: () => ({ decided })
+    }
+    const send: Extract<ConnectorDelivery, { kind: 'send' }> = {
+      kind: 'send',
+      deliveryId: 'd1',
+      expiresAt: 1_900_000_000_000,
+      conversation: { source: 'slack', externalId: 'T1:C1:1800000000.000100:U0BOT' },
+      text: 'hi'
+    }
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fake seam never reads its host.
+    const host = {} as Parameters<typeof dispatchDelivery>[1]
+    const dispatched = dispatchDelivery(seam, host, machine, send, () => 60_000)
+    expect(wakeGate).toHaveBeenCalledTimes(1)
+    decide('send')
+    await dispatched?.done
+    // Not asked again at redispatch: the admission handed to the seam is the dispatch-time one.
+    expect(wakeGate).toHaveBeenCalledTimes(1)
+    expect(calls.send.mock.calls[0]?.[0]).toMatchObject({ admit: admitted })
+  })
+})
+
 describe('the trigger gate', () => {
   it('skips a blocked event with a precheck-shaped record that holds no words', async () => {
     const decide = vi.fn<typeof decideSlackWake>(async () => decision({ exitCode: 1 }))

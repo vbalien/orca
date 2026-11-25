@@ -38,3 +38,22 @@ export function gatedHost(
   const admit = machine.wakeGate?.(delivery, later, gateDeadline(delivery, msLeft))
   return admit ? { ...host, admit } : host
 }
+
+/** A send that waits before going on (its muted thread's unmute) keeps the wake gate and carried
+ *  automations its dispatch saw, so a settings change meanwhile doesn't change its admission. */
+export function gateSnapshot<
+  Machine extends Pick<ConnectorMachine, 'wakeGate' | 'turnAutomations'>
+>(
+  machine: Machine,
+  delivery: Send,
+  later: readonly Send[],
+  msLeft: (expiresAt: number) => number
+): Machine {
+  const admit = machine.wakeGate?.(delivery, later, gateDeadline(delivery, msLeft))
+  const inTurn =
+    machine.turnAutomations?.([
+      ...(delivery.automations ?? []),
+      ...later.flatMap((next) => next.automations ?? [])
+    ]) ?? null
+  return { ...machine, wakeGate: () => admit, turnAutomations: () => inTurn }
+}

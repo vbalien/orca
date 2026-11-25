@@ -17,7 +17,7 @@ import type { ConnectorMachine } from './connector-machine'
 import { withoutAutomations } from './connector-thread-mute'
 import type { Delivery } from '../external-conversations/external-conversation-types'
 import type { TurnAutomations } from './connector-turn-automations'
-import { gateDeadline, gatedHost, triggerResult } from './connector-wake-gate-host'
+import { gateDeadline, gatedHost, gateSnapshot, triggerResult } from './connector-wake-gate-host'
 
 /** A delivery's settled result; `held` (its wake gate blocked it) stays on this machine. */
 export type DispatchResult = ConnectorDeliveryResult & { held?: true }
@@ -218,7 +218,7 @@ export function dispatchDelivery(
     const muted = machine.threadMute?.(delivery, record, carriedBefore)
     if (muted) {
       // Held until decided; one that then goes on carries its batch's later sends, as it would have.
-      const alone = { ...machine, threadMute: undefined }
+      const alone = { ...gateSnapshot(machine, delivery, later, msLeft), threadMute: undefined }
       let carried = (_carries: boolean): void => {}
       const carriedLater = new Promise<boolean>((resolve) => (carried = resolve))
       const done = settle(async (): Promise<ConnectorDeliveryResult> => {

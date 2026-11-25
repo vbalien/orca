@@ -1,6 +1,6 @@
 // "Check before waking": the bot's Slack wake gate, a command or TypeSafe Jev that decides whether a
 // Slack message or automation event wakes the bot. A section of its own in the Slack connector page.
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useId, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -99,6 +99,8 @@ const CASE_LABELS: Record<SlackGateCase, [string, string]> = {
 
 export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const t = useTranslate()
+  // One card per Slack workspace can be mounted at once: ids must be this card's own.
+  const id = useId()
   const [draft, setDraft] = useState<Draft>(() => draftOf(bot.slackGate))
   // The gate as saved; when it changes (a save, a removal, another device) an untouched form follows.
   const saved = bot.slackGate ?? null
@@ -169,24 +171,16 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           )}
         </p>
         <div className="flex items-center justify-between gap-2">
-          <Label htmlFor={`slack-gate-on-${bot.id}`}>
-            {t('bots.slack.gate.on', 'Check messages')}
-          </Label>
-          <Switch
-            id={`slack-gate-on-${bot.id}`}
-            checked={draft.on}
-            onCheckedChange={(on) => set({ on })}
-          />
+          <Label htmlFor={`${id}-on`}>{t('bots.slack.gate.on', 'Check messages')}</Label>
+          <Switch id={`${id}-on`} checked={draft.on} onCheckedChange={(on) => set({ on })} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`slack-gate-kind-${bot.id}`}>
-            {t('bots.slack.gate.kind', 'Check with')}
-          </Label>
+          <Label htmlFor={`${id}-kind`}>{t('bots.slack.gate.kind', 'Check with')}</Label>
           <Select
             value={draft.kind}
             onValueChange={(kind) => set({ kind: kind === 'command' ? 'command' : 'jev' })}
           >
-            <SelectTrigger id={`slack-gate-kind-${bot.id}`} size="sm">
+            <SelectTrigger id={`${id}-kind`} size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -205,12 +199,12 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
         <fieldset className="flex flex-col gap-1.5">
           <legend className="mb-1 font-medium">{t('bots.slack.gate.appliesTo', 'Check')}</legend>
           {SLACK_GATE_CASES.map((gateCase) => {
-            const id = `slack-gate-${gateCase}-${bot.id}`
+            const caseId = `${id}-${gateCase}`
             const [key, text] = CASE_LABELS[gateCase]
             return (
               <div key={gateCase} className="flex items-center gap-2">
                 <Checkbox
-                  id={id}
+                  id={caseId}
                   checked={draft.appliesTo.includes(gateCase)}
                   onCheckedChange={(checked) =>
                     set({
@@ -220,18 +214,16 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
                     })
                   }
                 />
-                <Label htmlFor={id}>{t(key, text)}</Label>
+                <Label htmlFor={caseId}>{t(key, text)}</Label>
               </div>
             )
           })}
         </fieldset>
         {draft.kind === 'command' ? (
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`slack-gate-command-${bot.id}`}>
-              {t('bots.slack.gate.command', 'Command')}
-            </Label>
+            <Label htmlFor={`${id}-command`}>{t('bots.slack.gate.command', 'Command')}</Label>
             <Input
-              id={`slack-gate-command-${bot.id}`}
+              id={`${id}-command`}
               variant="code"
               value={draft.command}
               onChange={(event) => set({ command: event.target.value })}
@@ -245,11 +237,11 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`slack-gate-question-${bot.id}`}>
+            <Label htmlFor={`${id}-question`}>
               {t('bots.slack.gate.question', 'Question for Jev')}
             </Label>
             <Textarea
-              id={`slack-gate-question-${bot.id}`}
+              id={`${id}-question`}
               value={draft.question}
               placeholder={t(
                 'bots.slack.gate.questionPlaceholder',
@@ -259,11 +251,11 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             />
             <div className="flex gap-2">
               <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor={`slack-gate-threshold-${bot.id}`}>
+                <Label htmlFor={`${id}-threshold`}>
                   {t('bots.slack.gate.threshold', 'Wake at or above')}
                 </Label>
                 <Input
-                  id={`slack-gate-threshold-${bot.id}`}
+                  id={`${id}-threshold`}
                   type="number"
                   min={0}
                   max={1}
@@ -273,11 +265,9 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
                 />
               </div>
               <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor={`slack-gate-model-${bot.id}`}>
-                  {t('bots.slack.gate.model', 'Model')}
-                </Label>
+                <Label htmlFor={`${id}-model`}>{t('bots.slack.gate.model', 'Model')}</Label>
                 <Input
-                  id={`slack-gate-model-${bot.id}`}
+                  id={`${id}-model`}
                   value={draft.model}
                   placeholder={SLACK_GATE_DEFAULT_MODEL}
                   onChange={(event) => set({ model: event.target.value })}
@@ -290,7 +280,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           </div>
         )}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`slack-gate-key-${bot.id}`}>
+          <Label htmlFor={`${id}-key`}>
             {t('bots.slack.gate.key', 'API key')}{' '}
             <span className="font-normal text-muted-foreground">
               {keyStatus?.apiKeySet
@@ -308,7 +298,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
           ) : null}
           <div className="flex gap-2">
             <Input
-              id={`slack-gate-key-${bot.id}`}
+              id={`${id}-key`}
               type="password"
               autoComplete="off"
               value={keyInput}
@@ -335,11 +325,11 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
         </div>
         <div className="flex gap-2">
           <div className="flex flex-1 flex-col gap-1">
-            <Label htmlFor={`slack-gate-timeout-${bot.id}`}>
+            <Label htmlFor={`${id}-timeout`}>
               {t('bots.slack.gate.timeout', 'Time limit (seconds)')}
             </Label>
             <Input
-              id={`slack-gate-timeout-${bot.id}`}
+              id={`${id}-timeout`}
               type="number"
               min={1}
               max={SLACK_GATE_MAX_TIMEOUT_SECONDS}
@@ -348,14 +338,14 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             />
           </div>
           <div className="flex flex-1 flex-col gap-1">
-            <Label htmlFor={`slack-gate-on-error-${bot.id}`}>
+            <Label htmlFor={`${id}-on-error`}>
               {t('bots.slack.gate.onError', 'If the check fails')}
             </Label>
             <Select
               value={draft.onError}
               onValueChange={(onError) => set({ onError: onError === 'block' ? 'block' : 'wake' })}
             >
-              <SelectTrigger id={`slack-gate-on-error-${bot.id}`} size="sm">
+              <SelectTrigger id={`${id}-on-error`} size="sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
