@@ -14,6 +14,7 @@ function context(features: string[]) {
   return {
     runtime: {
       bots: { enabled: () => true },
+      requireStore: () => ({ getRepos: () => [], getAllWorktreeMeta: () => ({}) }),
       lookAround: { botOfTidyUp: () => null, botOfLook: () => null },
       getConnectorCloud: () => ({ cloudFeatures: () => new Set(features), status: () => 'ready' }),
       getExternalConversationSeam: () => undefined

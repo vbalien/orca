@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { accessRequestPerson, botAccessRequestNoticeId } from '../../shared/bots/bot-access-request'
-import { botHasConnector } from '../../shared/bot-types'
+import { botHasConnector } from '../../shared/bots/bot-has-connector'
 import type { ConnectorAccessRequest } from '../../shared/connector-bot-access-contract'
 import type { BotSlackResult } from '../../shared/connector-bot-slack-contract'
 import { CONNECTOR_SOURCE_NAMES } from '../../shared/connectors/external-conversation-link'

@@ -166,8 +166,9 @@ function sendConnectorTurn(
       personsMessage: true,
       // Runs synchronously at admission, so a disable cannot interleave before the send.
       beforeRun: () => {
-        if (signal.aborted) {
-          throw new Error(refusalOf(signal))
+        // A slack-local asker who lost access since (admissible) is refused as well.
+        if (signal.aborted || delivery.admissible?.() === false) {
+          throw new Error(signal.aborted ? refusalOf(signal) : 'asker_not_allowed')
         }
         admit()
       }

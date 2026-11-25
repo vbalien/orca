@@ -152,7 +152,11 @@ export function createConnectorCloud({
         ])
       },
       triggers: () =>
-        connectorTriggers(store.listAutomations(), (hookId) => webhooks.pausing(hookId)),
+        connectorTriggers(
+          store.listAutomations(),
+          (hookId) => webhooks.pausing(hookId),
+          store.getBots?.() ?? []
+        ),
       runTrigger: async (delivery, deadlineAt) => {
         let expired = false
         const ran = await runTriggerDelivery(
@@ -196,7 +200,11 @@ export function createConnectorCloud({
       wantsConnection: () =>
         hostNeedsConnector(
           store.getBots?.() ?? [],
-          connectorTriggers(store.listAutomations(), (hookId) => webhooks.pausing(hookId))
+          connectorTriggers(
+            store.listAutomations(),
+            (hookId) => webhooks.pausing(hookId),
+            store.getBots?.() ?? []
+          )
         ),
       onHelloInputsChanged: (listener) => {
         runtime.onBotsWritten(listener)

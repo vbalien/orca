@@ -289,7 +289,9 @@ export type BotUpdateParams = z.infer<typeof BotUpdate>
  *  or the host MCP list, which only bots.tools.setHostMcpServers sets. */
 export type BotHostUpdates = BotUpdateParams['updates'] &
   Pick<Bot, 'google' | 'googleAccounts' | 'hostMcpServers' | 'slackGate'> &
-  Pick<Bot, 'acceptedOffers' | 'handedPairedWorkspaces' | 'itemsSeen'> & {
+  Pick<Bot, 'acceptedOffers' | 'handedPairedWorkspaces' | 'itemsSeen'> &
+  // Host-only: how its Slack connects (bots.slackLocal.* sets it).
+  Pick<Bot, 'slackConnection'> & {
     /** Host-only: a wait of this bot's was cancelled. */
     cancelledWait?: BotCancelledWait
   }

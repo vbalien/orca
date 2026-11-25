@@ -1,4 +1,5 @@
 // @protected-copy: drawn inside the security-surface setup dialog
+import { BotSlackUseOwnApp } from './BotSlackConnectionChoice'
 import React, { useEffect, useId, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { SlackIcon } from '@/components/icons/SlackIcon'
@@ -405,6 +406,8 @@ export function BotSlackSetupDialog({
       botName={bot.name}
       waiting
     >
+      {/* Outside the sign-in gate: the bot's own app needs no Orca Cloud account. */}
+      {botSlackApps(bot).length === 0 ? <BotSlackUseOwnApp bot={bot} onDone={close} /> : null}
       <OrcaCloudSignInGate
         hostId={bot.hostId}
         title={title}

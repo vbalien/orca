@@ -11,6 +11,7 @@ import { BotConnectorSection } from '../bot-connector-people'
 import { BotSlackPostAs } from './BotSlackPostAs'
 import { BotSlackGateCard } from './BotSlackGateCard'
 import { useSlackWhoCanAsk } from './use-slack-who-can-ask'
+import { BotSlackConnectionLine } from './BotSlackConnectionChoice'
 
 export function BotSlackSection({
   bot,
@@ -41,6 +42,7 @@ export function BotSlackSection({
             )}
           />
         </p>
+        <BotSlackConnectionLine />
       </BotConnectorSection>
       <BotWhoCanAskInsetList bot={bot} service={people} />
       <BotConnectorSection>

@@ -18,6 +18,7 @@ import { BotGitHubCard } from '@/components/bots/github/BotGitHubCard'
 import { BotGoogleCard } from '@/components/bots/google/BotGoogleCard'
 import { BotLinearCard } from '@/components/bots/linear/BotLinearCard'
 import { BotSlackCard } from '@/components/bots/slack/BotSlackCard'
+import { BotSlackLocalCard } from '@/components/bots/slack/BotSlackLocalCard'
 import { BotWebhooksCard } from '@/components/bots/webhooks/BotWebhooksCard'
 import { BotCloudSignInNotice } from '@/components/bots/BotCloudSignInNotice'
 import { BotConnectorsHostNotice } from '@/components/bots/BotConnectorsHostNotice'
@@ -57,7 +58,11 @@ function BotConnectorEntryCard({
   const { title } = entry
   switch (entry.kind) {
     case 'slack':
-      return <BotSlackCard bot={bot} teamId={entry.teamId} title={title} />
+      return entry.key === 'slack-local' ? (
+        <BotSlackLocalCard bot={bot} title={title} />
+      ) : (
+        <BotSlackCard bot={bot} teamId={entry.teamId} title={title} />
+      )
     case 'linear':
       return <BotLinearCard bot={bot} linear={entry.linear} title={title} />
     case 'github':

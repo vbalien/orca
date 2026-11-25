@@ -1,10 +1,4 @@
-import type { ConversationReplyFill } from './external-conversation-reply-fill'
-import type { SlackMirrorTurn } from './slack-mirror'
 import { setPromptPublication } from './external-conversation-prompt-publication'
-import type { AgentJournalCursor } from '../../shared/agent-session/journal/agent-session-journal-identity'
-import type { AgentPaneChange } from '../agent-hooks/observations/agent-transition-detector'
-import type { PendingPrompt } from '../../shared/agent-status/contracts/agent-pending-prompt'
-import type { AgentStatusIpcPayload } from '../../shared/agent-status/contracts/agent-status-ipc-payload'
 import type { AgentTurnOutcome } from '../../shared/agent-status/lifecycle/agent-turn-outcome'
 import type { ExternalConversationLink } from '../../shared/connectors/external-conversation-link'
 import type {
@@ -15,20 +9,12 @@ import type {
   ConnectorTurnOrigin
 } from '../../shared/connectors/connector-cloud-contract'
 import type { ConnectorWorkLink } from '../../shared/connector-work-link-contract'
-import type { AgentJournalRenderItem } from '../../shared/agent-session/journal/agent-session-journal-types'
-import type { ChatNews } from './external-conversation-chat'
+import type { ConversationEventsDeps } from './external-conversation-events-deps'
 import { ChatTurns, conversationWorking } from './external-conversation-chat-turns'
-import {
-  allLinks,
-  findLinkForPane,
-  type ExternalConversationLinkStore,
-  type LinkedConversation
-} from './external-conversation-links'
+import { allLinks, findLinkForPane, type LinkedConversation } from './external-conversation-links'
 import { writeLinkFact } from './external-conversation-link-writes'
 import { AnsweredPrompts } from './external-conversation-answered-prompts'
 import { ShownPrompts, type SnapshotEntryTrace } from './external-conversation-snapshot-prompts'
-import type { StructuredAgentSessionPromptStanding } from '../native-chat/agent-session-wire/observations/structured-agent-session-prompt-standing'
-import type { ConversationWorkersDeps } from './external-conversation-workers'
 import { ConversationTurnActivity, type ActivityEvent } from './external-conversation-turn-activity'
 import {
   conversationPane,
@@ -36,6 +22,8 @@ import {
   type ConversationPane,
   type ReplyTarget
 } from './external-conversation-types'
+
+export type { ConversationEventsDeps } from './external-conversation-events-deps'
 
 export type ConversationEvent =
   // actsFor: whom the linked chat acts for, once Orca recorded it.
@@ -102,53 +90,6 @@ export type ConversationSnapshot = {
 }
 
 export type ConversationWatchListener = (event: ConversationSnapshot | ConversationEvent) => void
-
-export type ConversationEventsDeps = {
-  store: ExternalConversationLinkStore
-  readHookRow: (paneKey: string) => AgentStatusIpcPayload | null
-  onAgentPaneChange: (listener: (change: AgentPaneChange) => void) => () => void
-  pendingPrompt: (link: ExternalConversationLink) => PendingPrompt | null
-  /** A shown prompt's standing in the chat's journal; `unknown` when the chat can't tell now. */
-  promptStanding: (
-    link: ExternalConversationLink,
-    promptId: string,
-    cursor?: AgentJournalCursor
-  ) => StructuredAgentSessionPromptStanding
-  promptCursor?: (link: ExternalConversationLink, id: string) => AgentJournalCursor | undefined
-  /** Native chats' prompts and turn ends; returns the release. */
-  onChatNews: (listener: (news: ChatNews) => void) => () => void
-  onWatchDisposed?: () => void
-  /** Read once per ended chat turn. */
-  chatTurnOrigin: (sessionId: string, turnAt: number | null) => ConnectorTurnOrigin
-  /** Whether a delivery was sent to the chat (or its running turn claims some) and it hasn't ended. */
-  chatTurnDelivered: (sessionId: string) => boolean
-  /** The delivery a chat turn that began at `turnAt` answers; taken once. */
-  chatTurnDelivery: (sessionId: string, turnAt: number) => string | undefined
-  /** Whether a delivery the chat took waits for a turn to name it. */
-  chatTurnWaiting: (sessionId: string) => boolean
-  /** Whether reports from workers its conversation's turns started opened the chat's running turn. */
-  runningTurnReported: (sessionId: string) => boolean
-  /** The pull requests a bot conversation's work opened, read once per ended turn. */
-  workLinks: (link: ExternalConversationLink) => Promise<ConnectorWorkLink[]>
-  workerActivities: ConversationWorkersDeps['workerActivities']
-  /** Whether the cloud routes a bot's prompts by who raised them (prompts.audience). */
-  promptsAudience: () => boolean
-  /** The ended turn's owner posts to its Slack thread, taken once; null when none posted. */
-  mirrorTurn?: (sessionId: string) => SlackMirrorTurn | null
-  /** Whom a chat's conversation acts for, as Orca recorded it. */
-  actsForOf?: (sessionId: string) => ConnectorActsFor | undefined
-  replyFill?: () => ConversationReplyFill | null
-  /** The message that opened the chat's running turn; null when none runs. */
-  turnOpener: (sessionId: string) => AgentJournalRenderItem | null
-  turnPlan?: ConstructorParameters<typeof ConversationTurnActivity>[0]['turnPlan']
-  turnStartedAt?: (sessionId: string) => number | null
-  resolvedPrompt?: (
-    sessionId: string,
-    itemId: string
-  ) => AgentJournalRenderItem | null | Promise<AgentJournalRenderItem | null>
-  setTimer: (run: () => void, delayMs: number) => { cancel: () => void }
-  now: () => number
-}
 
 /** Linked chats' events: turn starts from their status rows, prompts and ends from their host's feed. */
 export class ConversationEvents {
@@ -274,7 +215,7 @@ export class ConversationEvents {
   private snapshot(): ConversationSnapshot {
     return {
       kind: 'snapshot',
-      conversations: [...allLinks(this.deps.store)].map((linked) => {
+      conversations: [...allLinks(this.deps.store)].filter(this.hears).map((linked) => {
         const { workspace, link } = linked
         const row = this.deps.readHookRow(link.paneKey)
         // First, as showing a prompt can adopt the turn that raised it.
@@ -326,8 +267,11 @@ export class ConversationEvents {
   }
 
   private linkedFor(paneKey: string): LinkedConversation | null {
-    return findLinkForPane(this.deps.store, paneKey)
+    const linked = findLinkForPane(this.deps.store, paneKey)
+    return linked && this.hears(linked) ? linked : null
   }
+
+  private readonly hears = ({ link }: LinkedConversation) => this.deps.audience?.(link) ?? true
 
   /** A turn end told from outside the chats' feed (one the Slack mirror held); false with no watcher. */
   tell(event: Extract<ConversationEvent, { kind: 'turn-ended' }>): boolean {

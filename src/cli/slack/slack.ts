@@ -9,6 +9,7 @@ import { formatActionResult, formatSaved, type ActionResult } from './slack-acti
 import { RuntimeClientError } from '../runtime/connection/types'
 import { actionArgs, readMessageText, type SlackVerb } from './slack-action-args'
 import { slackReadRefusal } from './slack-read-refusal'
+import { isLinearOrGitHubRef } from '../../shared/connectors/local-slack-conversation'
 
 // The host retries an unavailable cloud itself, waiting out Retry-After.
 const ACT_TIMEOUT_MS = 180_000
@@ -22,11 +23,9 @@ const HOST_REFUSALS: Readonly<Record<string, string>> = {
 // GitHub and Linear are the owner's, through their own tools; only Slack is the bot's.
 const NOT_SLACK =
   '`orca slack` works only in Slack. On GitHub use `gh`, on Linear `orca linear`; to answer where you were woken, `orca bot reply`.'
-const OTHER_SOURCE =
-  /^(?:linear|github):|^[\w.-]+\/[\w.-]+#\d+$|^[A-Z][A-Z0-9]*-\d+$|^https:\/\/(?:github\.com|linear\.app)\//
 
 export function refuseOtherSource(input: string | undefined): void {
-  if (input !== undefined && OTHER_SOURCE.test(input.trim())) {
+  if (input !== undefined && isLinearOrGitHubRef(input)) {
     throw new RuntimeClientError('invalid_argument', NOT_SLACK)
   }
 }
@@ -88,7 +87,7 @@ export async function callAct(
   if (!answer.result.ok) {
     const { refusal, message, reason, scope } = answer.result
     const slackRead =
-      params.verb === 'read' && params.ref !== undefined && !OTHER_SOURCE.test(params.ref.trim())
+      params.verb === 'read' && params.ref !== undefined && !isLinearOrGitHubRef(params.ref)
     if (!slackRead) {
       throw new RuntimeClientError(refusal, message)
     }

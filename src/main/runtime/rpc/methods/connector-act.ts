@@ -15,6 +15,11 @@ import {
 import { postConnectorAction } from '../../../connector-cloud/connector-actions'
 import { actionGoesToSlack, slackActionArgs } from '../../../connector-cloud/connector-slack-text'
 import { cloudConversation } from '../../../../shared/connectors/connector-cloud-contract'
+import { usesLocalSlack } from '../../../../shared/bots/bot-slack-connection'
+import {
+  linkedConversationOf,
+  localSlackActionRefusal
+} from '../../../slack-local/slack-local-action-policy'
 import { chatPaneKey } from '../../../external-conversations/external-conversation-chat'
 import { defineMethod, type RpcContext } from '../core'
 import type { z } from 'zod'
@@ -131,6 +136,18 @@ export async function actAsBot(
   }
   if (runtime.lookAround.botOfLook(sessionId) && !lookAroundConnectorVerbAllowed(verb, args)) {
     throw new ConnectorActError('look_around_reads_only', LOOK_AROUND_REFUSAL)
+  }
+  const linked = linkedConversationOf(runtime.requireStore(), sessionId)
+  const localRefusal = localSlackActionRefusal({
+    botUsesLocalSlack: usesLocalSlack(bot),
+    linked,
+    cloudTarget: linked ? cloudConversation(linked) : null,
+    verb,
+    ref,
+    args
+  })
+  if (localRefusal) {
+    throw new ConnectorActError('local_slack_unsupported', localRefusal)
   }
   const cloud = runtime.getConnectorCloud()
   const features = cloud?.cloudFeatures()
