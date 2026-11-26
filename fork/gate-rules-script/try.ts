@@ -11,6 +11,7 @@ import { slackGateOpenAIRequest } from '../../src/shared/bots/slack-gate-openai-
 import { formatSlackGateRulesText } from '../../src/shared/bots/slack-gate-rules-text'
 import { rulesScriptStdin } from '../../src/main/bots/slack-gate/slack-gate'
 import { runSlackGateCommand } from '../../src/main/bots/slack-gate/slack-gate-command'
+import { slackGateOpenAIEvent } from '../../src/main/bots/slack-gate/slack-gate-openai-run'
 import {
   readRulesScriptOutput,
   SLACK_GATE_SCRIPT_MAX_OUTPUT_BYTES
@@ -75,7 +76,12 @@ async function main(): Promise<void> {
       )
       return
     case 'ask': {
-      const request = slackGateOpenAIRequest(answer.config, { name: values['bot-name'] }, event)
+      // As Orca asks it (a slack.message automation event as a channel message).
+      const request = slackGateOpenAIRequest(
+        answer.config,
+        { name: values['bot-name'] },
+        slackGateOpenAIEvent(event)
+      )
       console.log('asks OpenAI; the request Orca would send:')
       console.log(
         request ? formatSlackGateRulesText(request) : '(too large to send: a failed check)'

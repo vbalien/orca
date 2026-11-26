@@ -273,4 +273,39 @@ it('puts the reason and the channel-message note in an automation run’s prompt
   expect(prompts[0]).toContain('was not addressed to you')
   // The session refused it: no turn began, so the next event may wake.
   expect(await open()).toBe(true)
+  // Looking up the thread's owning chat fails before anything reached a chat: the count goes back too.
+  refuse.now = false
+  const threaded = createBotAutomationDispatcher(
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: no session is reached here.
+    { startConversation: async () => ({ sessionId: 'new-1' }) } as unknown as Parameters<
+      typeof createBotAutomationDispatcher
+    >[0],
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: no turn is watched to its end here.
+    {
+      watch: async () => ({ dispose: () => {}, ended: new Promise(() => {}) }),
+      deliver: async () => ({}),
+      couldNotStart: () => {}
+    } as unknown as Parameters<typeof createBotAutomationDispatcher>[1],
+    {
+      adopt: () => true,
+      ownerChat: async () => {
+        throw new Error('the link store could not be read')
+      }
+    }
+  )
+  const run = await reserveRun('t2')
+  const owned = {
+    ...run,
+    event: { ...runEvent, threadOwner: { conversation: { source: 'slack', externalId: 'x' } } }
+  }
+  await expect(
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the launcher's input as the run service gives it.
+    threaded({
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fields the dispatcher reads of an automation.
+      automation: { ...automation, bot: { botId: 'b1', resultsTo: 'thread' } } as Automation,
+      run: owned,
+      target: { ...target, runsIn: 'new' }
+    } as never)
+  ).rejects.toThrow('could not be read')
+  expect(await open()).toBe(true)
 })

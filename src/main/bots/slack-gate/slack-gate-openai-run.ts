@@ -40,6 +40,12 @@ export function slackGateRecoveryCooldown(
     : slackGateLongestCooldown(gate.openai)
 }
 
+/** The event as OpenAI is asked about it: a slack.message automation event as the channel message
+ *  it is, so the channel questions (which answer false for other cases) judge it. */
+export function slackGateOpenAIEvent(event: SlackGateEvent): SlackGateEvent {
+  return isChannelMessage(event) ? { ...event, case: 'channel_message' } : event
+}
+
 export function isChannelMessage(event: SlackGateEvent): boolean {
   return (
     event.case === 'channel_message' ||
@@ -127,9 +133,7 @@ export class SlackGateOpenAIRun {
       .askOpenAI({
         config,
         bot: { name: bot.name },
-        // A slack.message automation event is asked as the channel message it is, so the channel
-        // questions (which answer false for other cases) judge it.
-        event: isChannelMessage(event) ? { ...event, case: 'channel_message' as const } : event,
+        event: slackGateOpenAIEvent(event),
         key,
         signal,
         opaque: rulesFrom === 'script'

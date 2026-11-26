@@ -109,3 +109,33 @@ export function pendingStatusOf(bot: BotCounts, now: number): SlackGatePendingSt
     ...(heldUntil !== undefined ? { heldUntil } : {})
   }
 }
+
+/** What stdin's `wakes` tells a rules script about one channel, as open() sees the counts: a last
+ *  wake past now (the clock went back) is now (`pulled`: the caller writes that), and a day ahead
+ *  of today counts as today. */
+export function channelWakesOf(
+  bot: BotCounts,
+  channelId: string,
+  at: number
+): { wakes: Record<string, { today: number; lastAt: number; pending?: true }>; pulled: boolean } {
+  const keys = bot.keys.get(channelId) ?? new Map<string, CountEntry>()
+  let pulled = false
+  const wakes = Object.fromEntries(
+    [...keys].map(([key, entry]) => {
+      if (entry.lastAt > at) {
+        entry.lastAt = at
+        pulled = true
+      }
+      const day = entry.day > localDay(at) ? entry.day : localDay(at)
+      return [
+        key,
+        {
+          today: entry.day === day ? entry.count : 0,
+          lastAt: entry.lastAt,
+          ...(pendingFor(bot, channelId, key).length > 0 ? { pending: true as const } : {})
+        }
+      ]
+    })
+  )
+  return { wakes, pulled }
+}

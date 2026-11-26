@@ -19,8 +19,9 @@ scenario scenarios-script.sh
 echo "== leaks"
 source $E/lib.sh 2>/dev/null
 say "marks (gate key, Slack tokens) in files" "$(grep -rl 'E2EGATEKEYMARK93\|E2EBOTMARK91\|E2EAPPMARK92' $R/srv $R/cli $R/logs 2>/dev/null | wc -l)" 0
-say "message text in the server log" "$(grep -c 'release notes live\|shared notes for the offsite\|lunch at noon' $R/logs/serve*.log | awk -F: '{s+=$2} END {print s}')" 0
-say "message text in the wake-count / participation files" "$(grep -rl 'release notes\|offsite\|lunch' $R/srv/data/bot-slack-gate-wakes $R/srv/data/slack-local-participation 2>/dev/null | wc -l)" 0
+# Every message the fake Slack sent carries the mark "e2emsgmark".
+say "message text in the server log" "$(cat $R/logs/serve*.log | grep -c e2emsgmark)" 0
+say "message text in the wake-count / participation / copy files" "$(grep -rl e2emsgmark $R/srv/data/bot-slack-gate-wakes $R/srv/data/slack-local-participation $R/srv/data/bot-slack-gate-copies 2>/dev/null | wc -l)" 0
 echo "== [slack-gate] log lines"
 python3 - "$R" <<'PY'
 import re, sys, glob

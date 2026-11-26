@@ -12,7 +12,6 @@ import {
   slackGateWakeKey,
   StateFile,
   type BotCounts,
-  type CountEntry,
   type LiveEntry,
   type Reservation
 } from './slack-gate-wake-counts-model'
@@ -22,6 +21,7 @@ import {
   pendingFor,
   pendingStatusOf,
   type SlackGatePendingStatus,
+  channelWakesOf,
   closedCounts,
   pruneCounts,
   serializeCounts
@@ -168,17 +168,11 @@ export class SlackGateWakeCounts {
 
   /** What stdin's `wakes` tells a rules script about one channel. */
   channelWakes(bot: BotCounts, channelId: string, at: number) {
-    const keys = bot.keys.get(channelId) ?? new Map<string, CountEntry>()
-    return Object.fromEntries(
-      [...keys].map(([key, entry]) => [
-        key,
-        {
-          today: entry.day === localDay(at) ? entry.count : 0,
-          lastAt: entry.lastAt,
-          ...(pendingFor(bot, channelId, key).length > 0 ? { pending: true } : {})
-        }
-      ])
-    )
+    const { wakes, pulled } = channelWakesOf(bot, channelId, at)
+    if (pulled) {
+      void bot.file.write(() => serializeCounts(bot, this.deps.now()))
+    }
+    return wakes
   }
 
   /** Reserves one count for a rule about to wake the bot; null when no more can be reserved. The
@@ -262,9 +256,14 @@ export class SlackGateWakeCounts {
         }
         return ok
       }),
-      admit: () => {
+      admit: (at) => {
         if (entry.phase !== 'waiting') {
           return entry.phase === 'delivering'
+        }
+        // Past its wait (a late timer, or a clock moved on): too late to deliver; it goes back.
+        if (at - entry.at >= RESERVATION_WAIT_MS) {
+          reservation.release()
+          return false
         }
         entry.phase = 'delivering'
         return true

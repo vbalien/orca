@@ -12,6 +12,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 const [dir, apiPort, wssPort, ctlPort, repo] = process.argv.slice(2)
 const { WebSocketServer } = await import(`${repo}/node_modules/ws/wrapper.mjs`)
 const held = []
+const MESSAGE_MARK = 'e2emsgmark'
 let postsMode = 'ok' // ok | 429 (the next post answers 429, Retry-After 3)
 const log = (entry) =>
   appendFileSync(`${dir}/calls.jsonl`, `${JSON.stringify({ at: Date.now(), ...entry })}\n`)
@@ -224,7 +225,9 @@ createServer((req, res) => {
     if (req.url === '/event') {
       const ts = nextTs()
       const mention = input.mention !== false
-      const text = mention ? `<@${BOT_USER}> ${input.text}` : input.text
+      // Every message carries a mark, so the leak check finds any of them stored where no text belongs.
+      const words = `${input.text} ${MESSAGE_MARK}`
+      const text = mention ? `<@${BOT_USER}> ${words}` : words
       const event = mention
         ? {
             type: 'app_mention',

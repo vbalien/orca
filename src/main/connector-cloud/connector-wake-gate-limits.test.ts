@@ -14,7 +14,11 @@ import type { BotSlackGate } from '../../shared/bots/bot-slack-gate'
 import { toStoredSlackGate } from '../../shared/bots/slack-gate-store-form'
 import { BotStateFile, useBotStateRoot } from '../bots/slack-gate/bot-state-file'
 import type { decideSlackWake } from '../bots/slack-gate/slack-gate'
-import { takeSlackGateRun } from '../bots/slack-gate/slack-gate-runs'
+import { heldSlackGateRuns, takeSlackGateRun } from '../bots/slack-gate/slack-gate-runs'
+import {
+  runForEvent,
+  type AutomationTriggerRunContext
+} from '../automations/automation-trigger-runs'
 import { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
 import { createConnectorWakeGate, type WakeGateBot } from './connector-wake-gate'
 
@@ -228,4 +232,59 @@ it('holds limited rules for the gate’s longest cooldown when an automation eve
   const { heldUntil } = await counts.pendingStatus('b1')
   expect(typeof heldUntil).toBe('number')
   expect(Number(heldUntil)).toBeGreaterThanOrEqual(wallNow() + 10_079 * 60_000)
+})
+
+it('gives the count back and drops the held reason when the run can’t be stored, through the real event path', async () => {
+  const gate = wakeGate(reserving())
+  let failNext = true
+  const stored: AutomationRun[] = []
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: event admission calls only these members.
+  const ctx = {
+    store: {
+      listAutomations: () => [
+        { ...automation, enabled: true, createdAt: 0, missedRunGraceMinutes: 60 }
+      ],
+      listAutomationRuns: () => stored,
+      getLatestAutomationOccurrence: () => null
+    },
+    runs: {
+      createRun: async (
+        _automation: Automation,
+        _at: number,
+        _kind: string,
+        _event: unknown,
+        runId?: string
+      ) => {
+        if (failNext) {
+          failNext = false
+          throw new Error('disk full')
+        }
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fields admission reads of a run.
+        const run = { id: runId ?? 'r', status: 'pending' } as AutomationRun
+        stored.push(run)
+        return run
+      },
+      foldEvent: async () => null,
+      repeatSkip: async () => null
+    },
+    wakeGateDelayMs: 0,
+    inLane: (_id: string, operation: () => Promise<unknown>) => operation(),
+    describeRefusal: async () => null,
+    resolveTarget: () => ({ ok: true }),
+    dispatch: async () => {},
+    launch: () => {},
+    once: null
+  } as unknown as AutomationTriggerRunContext
+  const event = { ...runEvent, occurredAt: wallNow() }
+  // Earlier tests here leave runs in the process's table: only this one's change counts.
+  const heldBefore = heldSlackGateRuns().length
+  const first = gate.triggerGate({ ...trigger, deliveryId: 't5' }, event, undefined, () => {})!
+  await expect(runForEvent(ctx, 'auto1', event, first)).rejects.toThrow('disk full')
+  expect(await open()).toBe(true)
+  expect(heldSlackGateRuns()).toHaveLength(heldBefore)
+  // The next event is let through and its run made.
+  const second = gate.triggerGate({ ...trigger, deliveryId: 't6' }, event, undefined, () => {})!
+  await runForEvent(ctx, 'auto1', { ...event, key: 'k2' }, second)
+  expect(stored).toHaveLength(1)
+  expect(await open()).toBe(false)
 })

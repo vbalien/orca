@@ -215,8 +215,15 @@ export function createBotAutomationDispatcher(
     const { runsIn } = target
     const chosenChat = automation.bot?.chat?.sessionId
     const saved = automation.bot?.resultsTo ?? 'chat'
-    const route: ThreadRoute =
-      saved === 'thread' ? await threadRoute(threads, run, runsIn) : { kind: 'take' }
+    let route: ThreadRoute
+    try {
+      route = saved === 'thread' ? await threadRoute(threads, run, runsIn) : { kind: 'take' }
+    } catch (error) {
+      // Nothing reached a chat: the gate's count goes back.
+      gate.notStarted()
+      turns.dispose()
+      throw error
+    }
     // A new conversation that never opened has no chat to show why: the bot's Chat does.
     const destination: BotRunChat =
       route.kind === 'owner'

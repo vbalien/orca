@@ -291,3 +291,25 @@ it('takes a file with a day that is not a date for unreadable, and replaces it o
   )
   expect(readFileSync(path, 'utf8')).not.toBe(broken)
 })
+
+it('refuses a late admission even before the wait timer ran, and gives the count back', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const late = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
+  await late.persisted
+  expect(late.admit(now + RESERVATION_WAIT_MS + 1)).toBe(false)
+  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(true)
+})
+
+it('tells a rules script the counts as open() sees them after the clock went back', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const woke = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
+  await woke.persisted
+  woke.admit(now)
+  woke.commit(now)
+  now -= 86_400_000
+  const [wakes] = Object.values(store.channelWakes(bot, 'C1', now))
+  // Still today's one wake, and its time is now, not a day ahead.
+  expect(wakes).toMatchObject({ today: 1, lastAt: now })
+})

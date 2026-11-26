@@ -147,7 +147,10 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
       }
       // Let through: from here a limited rule's count waits on the delivery's result.
       const at = now()
-      decision.reservation?.admit(at)
+      // Its count waited past its time: too late to deliver.
+      if (decision.reservation && !decision.reservation.admit(at)) {
+        return refused('delivery_expired')
+      }
       passed = {
         at,
         ...(decision.wakeReason ? { reason: decision.wakeReason } : {}),
