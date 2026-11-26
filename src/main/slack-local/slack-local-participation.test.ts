@@ -50,3 +50,15 @@ it('lets a new record write only after the forgotten one is gone, and keeps what
     ])
   )
 })
+
+it('keeps a new record through two removals in a row', async () => {
+  const records = new SlackLocalParticipations(() => true)
+  records.of('b1').add('T1:C1:1.0:U0BOT:c')
+  records.forget('b1')
+  records.of('b1').add('T1:C1:2.0:U0BOT:c')
+  records.forget('b1')
+  records.of('b1').add('T1:C1:3.0:U0BOT:c')
+  await vi.waitFor(() =>
+    expect(JSON.parse(readFileSync(file(), 'utf8')).threads).toEqual(['T1:C1:3.0:U0BOT:c'])
+  )
+})

@@ -1,6 +1,6 @@
 // A limited rule's counts: a reservation holds a count from the decision to its delivery, only a
 // delivered wake keeps it, and the counts survive a restart, an unreadable file and a clock set back.
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -265,4 +265,29 @@ it('keeps room for reservations under the key cap, not only counts already kept'
   // The last place went to the first: the second rule waits.
   expect(store.open(bot, 'C1', 'b', daily, now)).toBe(false)
   expect(store.reserve(bot, { channelId: 'C1', question: 'b', at: now })).toBeNull()
+})
+
+it('takes a file with a day that is not a date for unreadable, and replaces it only once kept aside', async () => {
+  const path = new BotStateFile('bot-slack-gate-wakes', 'b1').path
+  const broken = JSON.stringify({
+    v: 1,
+    keys: { C1: { k: { day: 'not-a-date', count: 1, lastAt: 0 } } }
+  })
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, broken)
+  // It can't be kept aside: it stays as it was, and limited rules wait.
+  const keep = vi.spyOn(BotStateFile.prototype, 'preserveUnreadable').mockResolvedValueOnce(false)
+  const first = counts()
+  const held = await first.load('b1', 0)
+  expect(first.open(held, 'C1', 'banter', daily, now)).toBe(false)
+  expect(readFileSync(path, 'utf8')).toBe(broken)
+  expect((await first.pendingStatus('b1')).heldUntil).toBe('replaced')
+  keep.mockRestore()
+  // Kept aside next time: replaced, and held until the next local day.
+  const second = counts()
+  await second.load('b1', 0)
+  expect((await second.pendingStatus('b1')).heldUntil).toBe(
+    new Date(2026, 10, 27, 0, 0, 0).getTime()
+  )
+  expect(readFileSync(path, 'utf8')).not.toBe(broken)
 })

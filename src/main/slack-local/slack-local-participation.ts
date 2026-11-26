@@ -130,12 +130,14 @@ export class SlackLocalParticipation {
   }
 
   /** The bot stopped using its own app (or is gone): what it joined is forgotten, and this record is
-   *  closed for good; SlackLocalParticipations makes a new one if it comes back. */
-  async forget(): Promise<void> {
+   *  closed for good at once; the file goes after `after` (an earlier removal) is done.
+   *  SlackLocalParticipations makes a new record if it comes back. */
+  async forget(after: Promise<unknown> = Promise.resolve()): Promise<void> {
     this.closed = true
     this.threads.clear()
     this.seenInSlack.clear()
     this.loading = Promise.resolve()
+    await after.catch(() => undefined)
     await this.file.remove()
   }
 }
@@ -159,7 +161,8 @@ export class SlackLocalParticipations {
 
   /** Off its own app or deleted: which channel-message threads it joined no longer matters. */
   forget(botId: string): void {
-    const removal = this.of(botId).forget()
+    // After any removal still under way, so the last one done is always the latest.
+    const removal = this.of(botId).forget(this.removing.get(botId))
     this.bots.delete(botId)
     this.removing.set(botId, removal)
     void removal.finally(() => {

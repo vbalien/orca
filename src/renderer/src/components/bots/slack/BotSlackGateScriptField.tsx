@@ -34,16 +34,21 @@ export function BotSlackGateScriptField(props: {
         onChange={(event) => props.onChange(event.target.value)}
       />
       <p id={`${id}-rules-command-help`} className="leading-5 text-muted-foreground">
-        {props.editable
+        {!props.hostHasFeatures
           ? t(
-              'bots.slack.gate.rulesCommandHelp',
-              'Gets each message as JSON on stdin and prints the rules to ask OpenAI, or decides itself. It never gets the key. Keep it outside the bot’s folders: the bot’s agent runs as the same user and could change it.'
+              'bots.slack.gate.hostTooOldNewer',
+              'Update Orca on this bot’s computer to use channel messages, rules scripts, notes or limits.'
             )
-          : t(
-              'bots.slack.gate.rulesCommandRemote',
-              'Set in Orca on {{computer}}: a script runs there, so only that computer chooses it.',
-              { computer: props.computer }
-            )}
+          : props.editable
+            ? t(
+                'bots.slack.gate.rulesCommandHelp',
+                'Gets each message as JSON on stdin and prints the rules to ask OpenAI, or decides itself. It never gets the key. Keep it outside the bot’s folders: the bot’s agent runs as the same user and could change it.'
+              )
+            : t(
+                'bots.slack.gate.rulesCommandRemote',
+                'Set in Orca on {{computer}}: a script runs there, so only that computer chooses it.',
+                { computer: props.computer }
+              )}
       </p>
       {lastRun ? (
         <p className="leading-5 text-muted-foreground">

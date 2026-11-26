@@ -4,7 +4,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import { useBotStateRoot } from '../bots/slack-gate/bot-state-file'
 import { SlackLocalParticipation } from './slack-local-participation'
@@ -102,4 +102,38 @@ it('posts nothing for a chat that is no longer its thread’s', async () => {
   h.replies.observe(ended({ lastAssistantMessage: 'late answer' }, 1))
   await settled()
   expect(h.posted).toEqual([])
+})
+
+it('stops an answer waiting out a rate limit once another chat took the thread meanwhile', async () => {
+  let holds = true
+  const calls: string[] = []
+  const participation = new SlackLocalParticipation(`b${++bots}`, () => true)
+  await participation.load()
+  participation.add(chat.externalId)
+  const replies = new SlackLocalReplies({
+    fetch: async () => {
+      calls.push('chat.postMessage')
+      // Slack asks to wait; while the answer waits, the thread's link goes to another chat.
+      holds = false
+      return new Response(JSON.stringify({ ok: false, error: 'ratelimited' }), {
+        status: 429,
+        headers: { 'retry-after': '1' }
+      })
+    },
+    current: async () => ({
+      botToken: 'xoxb-test',
+      identity: { teamId: 'T1', botUserId: 'U0BOT' }
+    }),
+    hostName: () => 'host',
+    signal: new AbortController().signal,
+    onError: () => {},
+    participation,
+    canPost: () => holds,
+    sleep: async () => {}
+  })
+  replies.observe(ended({ lastAssistantMessage: 'an answer' }, 1))
+  await vi.waitFor(() => expect(calls).toHaveLength(1))
+  await settled()
+  // The retry checked the thread again first: no second post.
+  expect(calls).toHaveLength(1)
 })

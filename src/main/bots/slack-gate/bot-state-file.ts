@@ -55,12 +55,13 @@ export class BotStateFile {
     }
   }
 
-  /** Keeps a copy of an unreadable file next to it before it is replaced. */
-  async preserveUnreadable(): Promise<void> {
+  /** Keeps a copy of an unreadable file next to it before it is replaced; false when it could not. */
+  async preserveUnreadable(): Promise<boolean> {
     try {
       await copyFile(this.path, `${this.path}.corrupt-${Date.now()}`)
+      return true
     } catch {
-      // Kept when it can be; the replacement goes on either way.
+      return false
     }
   }
 

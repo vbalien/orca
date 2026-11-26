@@ -83,8 +83,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const [keyStatus, setKeyStatus] = useState<SlackGateKeyStatus | null>(null)
   const commandUnsupported = bot.hostId === LOCAL_EXECUTION_HOST_ID && isWindowsDesktopClient()
   const place = useBotAccessPlace(bot.hostId)
-  const features = keyStatus?.features ?? []
-  const hostHasFeatures = features.length > 0
+  const hostHasFeatures = (keyStatus?.features?.length ?? 0) > 0
   const localApp = usesLocalSlack(bot)
 
   useEffect(() => {
@@ -101,6 +100,10 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const set = (patch: Partial<SlackGateDraft>) => setDraft((before) => ({ ...before, ...patch }))
   // Parsed once per edit; the editor parses the same text for its messages.
   const gate = useMemo(() => gateOf(draft), [draft])
+  const tooOld = t(
+    'bots.slack.gate.hostTooOldNewer',
+    'Update Orca on this bot’s computer to use channel messages, rules scripts, notes or limits.'
+  )
   const failed = (error: unknown) =>
     toast.error(
       error instanceof SlackGateHostTooOldError
@@ -109,10 +112,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
               'bots.slack.gate.hostTooOld',
               'Update Orca on this bot’s computer to use OpenAI Decisions checks.'
             )
-          : t(
-              'bots.slack.gate.hostTooOldNewer',
-              'Update Orca on this bot’s computer to use channel messages, rules scripts, notes or limits.'
-            )
+          : tooOld
         : error instanceof Error && error.message
           ? error.message
           : t('bots.slack.gate.saveFailed', 'Could not save the gate.')
@@ -289,6 +289,9 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             </div>
           ) : null}
         </fieldset>
+        {localApp && keyStatus && !hostHasFeatures ? (
+          <p className="leading-5 text-muted-foreground">{tooOld}</p>
+        ) : null}
         {draft.channelMessages ? (
           <BotSlackGateChannelField
             id={id}

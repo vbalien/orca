@@ -20,6 +20,8 @@ import {
   countWake,
   keptKeys,
   pendingFor,
+  pendingStatusOf,
+  type SlackGatePendingStatus,
   closedCounts,
   pruneCounts,
   serializeCounts
@@ -95,7 +97,13 @@ export class SlackGateWakeCounts {
       bot.unsafe = true
       bot.blockedUntil = Math.max(nextLocalMidnight(now), now + longestCooldownMinutes * 60_000)
       this.warn('wake counts unreadable; limited rules wait', { botId })
-      await file.preserveUnreadable()
+      // The unreadable file is replaced only once it is kept aside; until then limited rules wait.
+      if (!(await file.preserveUnreadable())) {
+        this.warn('wake counts unreadable and could not be kept aside; limited rules wait', {
+          botId
+        })
+        return bot
+      }
       if (await file.write(() => serializeCounts(bot, this.deps.now()))) {
         bot.unsafe = false
       }
@@ -316,27 +324,8 @@ export class SlackGateWakeCounts {
 
   /** For status: how many wakes wait to be counted, the oldest one's age, and whether limited rules
    *  are held after an unreadable file (until `blockedUntil`, or until it is replaced). */
-  async pendingStatus(
-    botId: string
-  ): Promise<{ pending: number; oldestMs?: number; heldUntil?: number | 'replaced' }> {
+  async pendingStatus(botId: string): Promise<SlackGatePendingStatus> {
     const loading = this.bots.get(botId)
-    if (!loading) {
-      return { pending: 0 }
-    }
-    const bot = await loading
-    const now = this.deps.now()
-    const ages = [...bot.pending.values()]
-      .filter((e) => e.phase !== 'settled')
-      .map((e) => now - e.at)
-    const heldUntil = bot.unsafe
-      ? ('replaced' as const)
-      : bot.blockedUntil !== undefined && bot.blockedUntil > now
-        ? bot.blockedUntil
-        : undefined
-    return {
-      pending: ages.length,
-      ...(ages.length > 0 ? { oldestMs: Math.max(...ages) } : {}),
-      ...(heldUntil !== undefined ? { heldUntil } : {})
-    }
+    return loading ? pendingStatusOf(await loading, this.deps.now()) : { pending: 0 }
   }
 }

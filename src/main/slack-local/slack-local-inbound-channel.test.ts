@@ -5,7 +5,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Bot } from '../../shared/bot-types'
 import type { BotSlackGate } from '../../shared/bots/bot-slack-gate'
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
@@ -13,6 +13,8 @@ import { useBotStateRoot } from '../bots/slack-gate/bot-state-file'
 import { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
 import { SlackLocalInbound } from './slack-local-inbound'
 import { SlackLocalParticipation } from './slack-local-participation'
+import { SlackLocalReplies } from './slack-local-replies'
+import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import type { LocalSlackWakeGate } from './slack-local-wake-gate'
 
 // ast-grep-ignore: test-no-wall-clock -- the participation and wake-count files these harnesses use run on the real clock.
@@ -59,6 +61,8 @@ function harness(
     /** Runs after the chat admitted the message, before it answers. */
     afterAdmit?: () => void
     limitsClosed?: boolean
+    /** A send answers only once this settles. */
+    sendWaits?: Promise<void>
   } = {}
 ) {
   const links = new Set(options.links ?? [])
@@ -102,6 +106,7 @@ function harness(
     ) => {
       calls.push({ kind: 'send', key: key.externalId, ...(input.note ? { note: input.note } : {}) })
       admit(input)
+      await options.sendWaits
       return { outcome: options.outcome ?? 'accepted' }
     }
   } as unknown as ExternalConversationSeam
@@ -270,4 +275,59 @@ it('reads and asks nothing when the gate’s limits already rule the message out
   expect(closed.reads).toEqual([])
   expect(closed.decided).toEqual([])
   expect(closed.calls).toEqual([])
+})
+
+it('holds "needs an answer in Orca" while an @mention into a thread the bot never joined is on its way', async () => {
+  const thread = '1800000000.000001'
+  const quiet = `T1:C1:${thread}:U0BOT:c`
+  for (const [outcome, posts] of [
+    ['accepted', 1],
+    ['refused', 0]
+  ] as const) {
+    // Each its own bot state: the first run's join is not the second's.
+    useBotStateRoot(mkdtempSync(join(tmpdir(), 'inbound-mention-')))
+    let answer: () => void = () => {}
+    const h = harness({
+      links: [quiet],
+      outcome,
+      sendWaits: new Promise<void>((resolve) => (answer = resolve))
+    })
+    const posted: string[] = []
+    const replies = new SlackLocalReplies({
+      fetch: async (_url, init) => {
+        posted.push(new URLSearchParams(String(init?.body)).get('markdown_text') ?? '')
+        return Response.json({ ok: true })
+      },
+      current: async () => ({
+        botToken: 'xoxb-test',
+        identity: { teamId: 'T1', botUserId: 'U0BOT' }
+      }),
+      hostName: () => 'host',
+      signal: new AbortController().signal,
+      onError: () => {},
+      participation: h.participation,
+      canPost: () => true
+    })
+    h.inbound.receive(
+      message({ type: 'app_mention', text: '<@U0BOT> are you there?', thread_ts: thread })
+    )
+    await settled()
+    expect(h.calls).toMatchObject([{ kind: 'send', key: quiet }])
+    // The chat asks for an answer in Orca while the mention is still being taken.
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the fields the replies read of a prompt.
+    replies.observe({
+      kind: 'prompt',
+      conversation: { source: 'slack-local', externalId: quiet },
+      worktreeId: 'wt',
+      paneKey: 'p',
+      prompt: { promptId: 'p1' },
+      answered: false
+    } as unknown as ConversationEvent)
+    await settled()
+    expect(posted).toEqual([])
+    answer()
+    await vi.waitFor(() => expect(posted).toHaveLength(posts))
+    await settled()
+    expect(posted).toHaveLength(posts)
+  }
 })

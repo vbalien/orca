@@ -22,8 +22,18 @@ export function slackGateWakeKey(questionName: string): string {
   return createHash('sha256').update(questionName).digest('hex').slice(0, 16)
 }
 
+/** A local calendar day as YYYY-MM-DD, a real one (the counts compare days as text). */
+const Day = z.string().refine((day) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day)
+  if (!match) {
+    return false
+  }
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return localDay(date.getTime()) === day
+})
+
 export const Count = z.object({
-  day: z.string(),
+  day: Day,
   count: z.number().int().nonnegative(),
   lastAt: z.number()
 })
@@ -31,7 +41,7 @@ export const Pending = z.object({
   id: z.string(),
   channelId: z.string(),
   key: z.string(),
-  rd: z.string(),
+  rd: Day,
   at: z.number(),
   automationId: z.string().optional(),
   runId: z.string().optional()

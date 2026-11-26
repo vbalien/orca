@@ -58,11 +58,11 @@ const NAMES = BOT_NAMES.map(escape).join('|')
 // The name anywhere, on its own: not inside a longer word, and not followed by a Latin letter, digit,
 // _ or - (so "mybot2" or "mybots" is someone else). Korean particles may follow it ("봇아", "봇님").
 const NAMED = new RegExp(`(^|[^\\p{L}\\p{N}])(${NAMES})(?![A-Za-z0-9_-])`, 'iu')
-// Called by name: the message opens with it (after a greeting or "@"), as a call — a comma, colon,
-// "!", "?" or "~" after it, a vocative particle (아, 야, 님, 씨), a greeting ("하이", "hi"), or
-// nothing else at all.
+// Called by name: the message opens with it (after a greeting or "@"), as a call — a comma, "!", "?"
+// or "~" after it, a vocative particle (아, 야, 님, 씨) or "하이", or nothing else at all. Not "mybot:"
+// (a status line's label) and not "mybothello" (the same right edge as NAMED).
 const CALLED = new RegExp(
-  `^[\\s@]*(?:(?:hi|hey|hello|yo|안녕하세요|안녕)[\\s,!.~]*)?(?:${NAMES})(?=\\s*[,:!?~]|아|야|님|씨|하이|\\s*(?:hi|hello|안녕)|\\s*$)`,
+  `^[\\s@]*(?:(?:hi|hey|hello|yo)\\b[\\s,!.~]*|(?:안녕하세요|안녕)[\\s,!.~]*)?(?:${NAMES})(?![A-Za-z0-9_-])(?=\\s*[,!?~]|아|야|님|씨|하이|\\s*$)`,
   'iu'
 )
 // A message that names the bot wakes it from here (tuned on 16 named messages; see fork/README).

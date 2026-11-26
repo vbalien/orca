@@ -85,3 +85,27 @@ export function closedCounts(file: BotStateFile): BotCounts {
   file.close()
   return { file, keys: new Map(), pending: new Map(), unsafe: false }
 }
+
+export type SlackGatePendingStatus = {
+  pending: number
+  oldestMs?: number
+  heldUntil?: number | 'replaced'
+}
+
+/** For status: how many wakes wait to be counted, the oldest one's age, and whether limited rules
+ *  are held after an unreadable file (until `blockedUntil`, or until it is replaced). */
+export function pendingStatusOf(bot: BotCounts, now: number): SlackGatePendingStatus {
+  const ages = [...bot.pending.values()]
+    .filter((entry) => entry.phase !== 'settled')
+    .map((entry) => now - entry.at)
+  const heldUntil = bot.unsafe
+    ? ('replaced' as const)
+    : bot.blockedUntil !== undefined && bot.blockedUntil > now
+      ? bot.blockedUntil
+      : undefined
+  return {
+    pending: ages.length,
+    ...(ages.length > 0 ? { oldestMs: Math.max(...ages) } : {}),
+    ...(heldUntil !== undefined ? { heldUntil } : {})
+  }
+}
