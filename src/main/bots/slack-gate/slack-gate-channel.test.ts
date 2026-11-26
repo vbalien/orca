@@ -449,3 +449,21 @@ it('queues Orca Cloud slack.message events with channel messages, so they never 
     'wake'
   ])
 })
+
+it('says which bot dropped a check when its channel queue is full', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const { decider: d } = decider({ askOpenAI: () => new Promise(() => {}) })
+  // One running and eight waiting fill the channel lane; the tenth is turned away.
+  for (let i = 0; i < 9; i++) {
+    void d.decide(bot(gate({ timeoutSeconds: 20 })), channel({ eventId: `e${i}` }))
+  }
+  await vi.waitFor(async () =>
+    expect(
+      await d.decide(bot(gate({ timeoutSeconds: 20 })), channel({ eventId: 'e9' }))
+    ).toMatchObject({ verdict: 'block', error: 'Too many gate checks are waiting for this bot' })
+  )
+  expect(warn).toHaveBeenCalledWith('[slack-gate] too many gate checks waiting (channel)', {
+    botId: 'b1',
+    times: 1
+  })
+})

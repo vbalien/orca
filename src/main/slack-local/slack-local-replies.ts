@@ -88,10 +88,13 @@ export class SlackLocalReplies {
     if (!text || !this.done.add(key)) {
       return
     }
-    // Words are an answer and go; a failure line is a notice (see `notice`).
-    await (words
-      ? this.post(event.conversation.externalId, event.paneKey, splitAnswer(text))
-      : this.notice(event.conversation.externalId, event.paneKey, [text]))
+    // Words are an answer and go; a failure line is a notice (see `notice`) — and so are the words of a
+    // failed turn in a thread a channel message opened (an agent's API error is said in words).
+    const notice =
+      !words || (failed && parseLocalSlackConversation(event.conversation.externalId)?.channel)
+    await (notice
+      ? this.notice(event.conversation.externalId, event.paneKey, [text])
+      : this.post(event.conversation.externalId, event.paneKey, splitAnswer(text)))
   }
 
   private async prompt(event: Prompt): Promise<void> {

@@ -67,6 +67,8 @@ it('keeps failure lines and prompts off Slack until the bot joins the thread, an
   h.replies.observe(prompt('p1'))
   // A quiet end (NO_REPLY) carries no words: nothing either.
   h.replies.observe(ended({}, 2))
+  // A failed turn whose words are the agent's error: a failure line too, so nothing before joining.
+  h.replies.observe(ended({ stopReason: 'failure', lastAssistantMessage: 'API Error: 400' }, 4))
   await settled()
   expect(h.posted).toEqual([])
   h.replies.observe(ended({ lastAssistantMessage: 'Here is the answer.' }, 3))

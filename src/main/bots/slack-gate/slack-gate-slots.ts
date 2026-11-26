@@ -1,6 +1,7 @@
 // How many gate checks run at once for a bot: a few, with a short line behind them. Channel messages
 // queue apart, so a busy channel never starves mentions and replies.
 import type { SlackGateOutcome } from './slack-gate-types'
+import { warnOncePerMinute } from './slack-gate-wake-counts-entries'
 
 export const SLACK_GATE_RUNNING_PER_BOT = 2
 export const SLACK_GATE_WAITING_PER_BOT = 16
@@ -25,6 +26,7 @@ export type SlackGateWork = () => Promise<{
 
 export class SlackGateSlots {
   private readonly slots = new Map<string, BotSlots>()
+  private readonly lastWarn = new Map<string, { at: number; count: number }>()
 
   /** Runs `work` in one of the bot's slots, held until its `released` settles. A stop or deadline
    *  ends the wait for an answer even while `work` is still starting (a stalled key read). */
@@ -44,6 +46,14 @@ export class SlackGateSlots {
     if (slots.running < slots.maxRunning) {
       slots.running += 1
     } else if (slots.waiting.length >= slots.maxWaiting) {
+      warnOncePerMinute(
+        this.lastWarn,
+        console.warn,
+        Date.now(),
+        botId,
+        `too many gate checks waiting (${lane})`,
+        {}
+      )
       return { kind: 'error', error: 'Too many gate checks are waiting for this bot' }
     } else if (!(await this.handedSlot(slots, signal))) {
       return { kind: 'error', error: 'Stopped while waiting' }

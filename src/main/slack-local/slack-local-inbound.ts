@@ -23,6 +23,7 @@ import {
 } from './slack-local-gate-context'
 import type { SlackLocalParticipation } from './slack-local-participation'
 import { slackGateLimitsClosed } from '../bots/slack-gate/slack-gate'
+import { warnOncePerMinute } from '../bots/slack-gate/slack-gate-wake-counts-entries'
 import { localSlackGateEvent, type LocalSlackWakeGate } from './slack-local-wake-gate'
 import { askerRole, SlackLocalAskers } from './slack-local-asker'
 import { SlackLocalThreadChats, type ThreadQueue } from './slack-local-thread-chat'
@@ -40,7 +41,6 @@ const ALL_WAITING = 200
 // Channel messages wait in a smaller queue of their own, so a busy channel never pushes out a mention.
 const PER_THREAD_CHANNEL_WAITING = 5
 const ALL_CHANNEL_WAITING = 20
-const WARN_EVERY_MS = 60_000
 
 export type SlackLocalReads = {
   /** The thread's messages, oldest first; throws when Slack can't say. */
@@ -80,7 +80,7 @@ export class SlackLocalInbound {
   private readonly gateContext: SlackLocalGateContext | null
   // Channel messages read their threads in a lane of their own, one at a time.
   private readonly channelReads: SlackLocalGateContext | null
-  private readonly lastWarn = new Map<string, number>()
+  private readonly lastWarn = new Map<string, { at: number; count: number }>()
   private readonly askers: SlackLocalAskers
   private readonly chats: SlackLocalThreadChats
   private readonly delivery: LocalSlackDeliveryDeps
@@ -126,12 +126,9 @@ export class SlackLocalInbound {
     return this.deps.now?.() ?? Date.now()
   }
 
-  private warn(cause: string): void {
-    const now = this.now()
-    if (now - (this.lastWarn.get(cause) ?? 0) >= WARN_EVERY_MS) {
-      this.lastWarn.set(cause, now)
-      console.warn(`[slack-local] ${cause}`)
-    }
+  /** One line per bot and cause a minute, naming the bot and how many times it came since. */
+  private warn(botId: string, cause: string): void {
+    warnOncePerMinute(this.lastWarn, console.warn, this.now(), botId, cause, {})
   }
 
   /** An events_api payload, already acknowledged to Slack. */
@@ -164,7 +161,7 @@ export class SlackLocalInbound {
         : queue.waiting - queue.channelWaiting >= PER_THREAD_WAITING ||
           this.waiting - this.channelWaiting >= ALL_WAITING
     if (full) {
-      this.warn(`dropped a message: too many waiting (${lane})`)
+      this.warn(bot.id, `slack-local dropped a message: too many waiting (${lane})`)
       return
     }
     queue.waiting += 1
