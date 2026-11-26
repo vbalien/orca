@@ -271,7 +271,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             <p className="text-muted-foreground">
               {t(
                 'bots.slack.gate.keyUnsealed',
-                'Saving a key needs the system keychain, which this computer does not offer Orca.'
+                'Saving a key needs the system keychain on this bot’s computer, which it does not offer Orca.'
               )}
             </p>
           ) : null}

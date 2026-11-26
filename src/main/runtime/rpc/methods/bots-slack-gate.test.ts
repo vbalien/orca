@@ -1,5 +1,5 @@
 // Who may change a bot's Slack wake gate: the owner's Orca. No agent CLI ever; a paired device may
-// tune the gate but never choose its command or touch its key.
+// tune the gate and set its key but never choose its command.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -75,7 +75,8 @@ const AGENTS = [
   { kind: 'local-cli' as const },
   { kind: 'paired-device' as const, deviceId: 'd', agent: true as const }
 ]
-const PHONE = { kind: 'paired-device' as const, deviceId: 'phone' }
+// A person on a paired computer: no agent claim.
+const PAIRED = { kind: 'paired-device' as const, deviceId: 'mac' }
 
 describe('bots.slackGate.set', () => {
   it('refuses every agent CLI', async () => {
@@ -94,7 +95,7 @@ describe('bots.slackGate.set', () => {
 
   it('lets a paired owner tune a gate but never change or clear its command', async () => {
     const bot = saved(gate('a'))
-    const { context } = contextFor(PHONE, bot)
+    const { context } = contextFor(PAIRED, bot)
     await call('bots.slackGate.set', { botId: 'b1', gate: gate('a', 9) }, context)
     expect(bot.bot.slackGate).toMatchObject({ command: 'a', timeoutSeconds: 9 })
     for (const next of [gate('b'), null]) {
@@ -107,14 +108,14 @@ describe('bots.slackGate.set', () => {
 
   it('checks a paired owner against the bot as saved, so a desktop edit is never undone', async () => {
     const bot = saved(gate('a'))
-    // The desktop changed the command after the phone read `a`.
+    // The desktop changed the command after the paired computer read `a`.
     await call(
       'bots.slackGate.set',
       { botId: 'b1', gate: gate('desktop') },
       contextFor({ kind: 'desktop' }, bot).context
     )
     await expect(
-      call('bots.slackGate.set', { botId: 'b1', gate: gate('a') }, contextFor(PHONE, bot).context)
+      call('bots.slackGate.set', { botId: 'b1', gate: gate('a') }, contextFor(PAIRED, bot).context)
     ).rejects.toThrow()
     expect(bot.bot.slackGate).toMatchObject({ command: 'desktop' })
   })
@@ -133,25 +134,41 @@ describe('bots.slackGate.set', () => {
 })
 
 describe('bots.slackGate key methods', () => {
-  it('refuse agents and paired devices, and never return the key', async () => {
+  it('refuse every agent CLI, which neither saves nor removes a key', async () => {
     const bot = saved()
-    for (const caller of [...AGENTS, PHONE]) {
+    for (const caller of AGENTS) {
       const { context } = contextFor(caller, bot)
       await expect(
         call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)
-      ).rejects.toThrow()
-      await expect(call('bots.slackGate.clearKey', { botId: 'b1' }, context)).rejects.toThrow()
+      ).rejects.toThrow('Your owner sets the Slack wake gate key in Orca.')
     }
     expect(await readSlackGateKey('b1')).toBeNull()
-    const { context } = contextFor({ kind: 'desktop' }, bot)
+    await saveSlackGateKey('b1', 'kept')
+    for (const caller of AGENTS) {
+      await expect(
+        call('bots.slackGate.clearKey', { botId: 'b1' }, contextFor(caller, bot).context)
+      ).rejects.toThrow('Your owner sets the Slack wake gate key in Orca.')
+    }
+    expect(await readSlackGateKey('b1')).toBe('kept')
+  })
+
+  it('let the owner on a paired computer save and remove a key, answering only its status', async () => {
+    const { context } = contextFor(PAIRED, saved())
     // A key is one header-safe line.
     expect(SlackGateSetKey.safeParse({ botId: 'b1', key: 'sk-1\nX-Other: y' }).success).toBe(false)
-    const answer = await call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)
-    expect(answer).toEqual({ apiKeySet: true, sealing: 'os-keychain' })
-    expect(JSON.stringify(answer)).not.toContain('secret')
-    expect(await call('bots.slackGate.status', { botId: 'b1' }, context)).toEqual({
+    expect(await call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)).toEqual({
       apiKeySet: true,
       sealing: 'os-keychain'
     })
+    expect(await readSlackGateKey('b1')).toBe('secret')
+    expect(await call('bots.slackGate.clearKey', { botId: 'b1' }, context)).toEqual({
+      apiKeySet: false,
+      sealing: 'os-keychain'
+    })
+    expect(await readSlackGateKey('b1')).toBeNull()
+    await expect(
+      call('bots.slackGate.setKey', { botId: 'other', key: 'secret' }, context)
+    ).rejects.toThrow('No such bot.')
+    expect(await readSlackGateKey('other')).toBeNull()
   })
 })
