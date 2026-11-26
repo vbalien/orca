@@ -1868,6 +1868,21 @@
       "youAndOthers_other": "You and {{count}} others"
     },
     "slack": {
+      "gate": {
+        "case": {
+          "dm": "Direct messages",
+          "mention": "Mentions",
+          "threadReply": "Replies in its threads",
+          "trigger": "Automation events"
+        },
+        "rules": {
+          "example": {
+            "default": "Default: skip replies not meant for the bot",
+            "smallTalk": "Block small talk",
+            "topic": "Topic and urgency"
+          }
+        }
+      },
       "postAs": {
         "line": "When you reply to a Slack thread from Orca, it posts as <picker>{{name}}</picker>"
       },
