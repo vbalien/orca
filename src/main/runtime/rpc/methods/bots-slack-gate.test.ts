@@ -1,6 +1,6 @@
 // Who may change a bot's Slack wake gate: the owner's Orca. No agent CLI ever; a paired device may
 // tune the gate and set its key but never choose its command.
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,7 @@ import {
 } from '../../../bots/slack-gate/slack-gate-key'
 import { SlackGateSetKey } from '../../../../shared/rpc-contract/bots-slack-gate-params'
 import { oldSchemaView } from '../../../../shared/bots/slack-gate-store-form'
-import { useBotStateRoot } from '../../../bots/slack-gate/bot-state-file'
+import { BotStateFile, useBotStateRoot } from '../../../bots/slack-gate/bot-state-file'
 import type { RpcContext } from '../core'
 import { BOT_SLACK_GATE_METHODS } from './bots-slack-gate'
 
@@ -238,6 +238,19 @@ describe('bots.slackGate.restore', () => {
   }
   beforeEach(() => useBotStateRoot(dir))
   afterEach(() => useBotStateRoot(null))
+
+  it('shows a hold kept from before a restart, before any event came', async () => {
+    // A fixed time far ahead: held until then.
+    const until = Date.UTC(2099, 0, 1)
+    const path = new BotStateFile('bot-slack-gate-wakes', 'b-held').path
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, JSON.stringify({ v: 1, blockedUntil: until, keys: {} }))
+    const record = { bot: { ...saved().bot, id: 'b-held' } }
+    const { context } = contextFor(PAIRED, record)
+    await call('bots.slackGate.store', { botId: 'b-held', gate: limited }, context)
+    const status = await call('bots.slackGate.status', { botId: 'b-held' }, context)
+    expect(status).toMatchObject({ pendingWakes: { heldUntil: until } })
+  })
 
   it('keeps showing Restore after a key change', async () => {
     const record = await olderBuildRewrote()

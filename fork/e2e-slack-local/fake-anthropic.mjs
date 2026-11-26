@@ -1,5 +1,5 @@
 // A fake Anthropic Messages API for the bot's claude agent in the isolated E2E (127.0.0.1 only). It answers
-// every turn from the last user message: "[quiet]" → NO_REPLY (unless "[speak]" too), "[fail]" → HTTP 500, otherwise a short
+// every turn from the last user message: "[quiet]" → NO_REPLY (unless "[speak]" too), "[fail]" → HTTP 400 (not retried), otherwise a short
 // answer naming the first [tag] it sees. Each request's text goes to anthropic.jsonl in the run folder
 // (to check what the bot was told), never anywhere else.
 // usage: node fake-anthropic.mjs <state dir> <port>
@@ -41,8 +41,11 @@ createServer((req, res) => {
       })}\n`
     )
     if (/\[fail\]/.test(last)) {
-      res.writeHead(500, { 'content-type': 'application/json' })
-      return res.end('{"type":"error","error":{"type":"api_error","message":"e2e failure"}}')
+      // A request error the client doesn't retry: the turn fails at once.
+      res.writeHead(400, { 'content-type': 'application/json' })
+      return res.end(
+        '{"type":"error","error":{"type":"invalid_request_error","message":"e2e failure"}}'
+      )
     }
     const tag = /\[([a-z0-9-]+)\]/.exec(last)?.[1] ?? 'none'
     // [speak] wins over a [quiet] that only came along in the thread's earlier messages.

@@ -6,7 +6,10 @@ import {
   type BotSlackGate,
   type BotSlackGateEdit
 } from '../../../../shared/bots/bot-slack-gate'
-import { canonicalSlackGateRules } from '../../../../shared/bots/slack-gate-rules-config'
+import {
+  canonicalSlackGateRules,
+  slackGateRulesExtended
+} from '../../../../shared/bots/slack-gate-rules-config'
 import { toStoredSlackGate } from '../../../../shared/bots/slack-gate-store-form'
 import {
   SLACK_GATE_FEATURES,
@@ -17,6 +20,7 @@ import {
   type SlackGateKeyStatus
 } from '../../../../shared/rpc-contract/bots-slack-gate-params'
 import { slackGateScriptRun, slackGateWakeCounts } from '../../../bots/slack-gate/slack-gate'
+import { slackGateRecoveryCooldown } from '../../../bots/slack-gate/slack-gate-openai-run'
 import {
   forgetSlackGateCopy,
   keepSlackGateCopy,
@@ -57,8 +61,21 @@ async function keyStatus(botId: string, stored?: BotSlackGate | null): Promise<S
     ...(stored !== undefined && (await restorableSlackGate(botId, stored).catch(() => null))
       ? { restorable: true }
       : {}),
-    pendingWakes: await slackGateWakeCounts.pendingStatus(botId)
+    pendingWakes: await pendingWakes(botId, stored)
   }
+}
+
+/** The gate's counts as status shows them; read first when the gate counts (limits or a rules script),
+ *  so a hold kept from before a restart shows before any event came. */
+async function pendingWakes(botId: string, stored: BotSlackGate | null | undefined) {
+  const gate = stored ? effectiveSlackGate(stored) : null
+  if (
+    gate?.kind === 'openai' &&
+    (gate.rulesCommand || slackGateRulesExtended(gate.openai).limits)
+  ) {
+    await slackGateWakeCounts.load(botId, slackGateRecoveryCooldown(gate)).catch(() => undefined)
+  }
+  return await slackGateWakeCounts.pendingStatus(botId)
 }
 
 /** A deleted bot's keys go with it, and its gate's counts and copy; a failed delete keeps the bot, so
