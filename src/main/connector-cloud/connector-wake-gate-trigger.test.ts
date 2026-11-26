@@ -15,11 +15,11 @@ type Trigger = Extract<ConnectorDelivery, { kind: 'trigger' }>
 
 const gate = (appliesTo: BotSlackGate['appliesTo']): BotSlackGate => ({
   on: true,
-  kind: 'jev',
+  kind: 'command',
   appliesTo,
   timeoutSeconds: 5,
   onError: 'wake',
-  jev: { question: 'Should the bot run?', threshold: 0.5 }
+  command: 'should-the-bot-run'
 })
 const bots: WakeGateBot[] = [
   { id: 'slackBot', name: 'S', paused: false, slackGate: gate(['trigger']) },
@@ -163,7 +163,12 @@ describe('the trigger gate', () => {
     expect(reserved).toMatchObject({
       skipped: {
         error: 'Slack wake gate blocked this event.',
-        precheckResult: { command: 'Slack wake gate (jev)', stdout: '', stderr: '', exitCode: 1 }
+        precheckResult: {
+          command: 'Slack wake gate (command)',
+          stdout: '',
+          stderr: '',
+          exitCode: 1
+        }
       }
     })
     expect(JSON.stringify(reserved)).not.toContain('private words')

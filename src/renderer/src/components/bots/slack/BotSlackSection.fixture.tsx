@@ -12,6 +12,7 @@ import { connectorAvatarSrc } from '../../../../../shared/connector-avatar-schem
 import { i18n, loadRendererUiLanguage } from '@/i18n/i18n'
 import type { UiLanguage } from '../../../../../shared/i18n/ui-language'
 import { botConnectorRowKey, openBotConnectorPage } from '../bot-connector-page'
+import { SLACK_GATE_DEFAULT_RULES } from '../../../../../shared/bots/slack-gate-default-rules'
 
 // The Slack photo's address; the host's avatar cache is played by a bundled portrait wherever its
 // cached src is drawn, so the shot never waits on the network.
@@ -151,11 +152,11 @@ const gated: Bot = {
   ...builder,
   slackGate: {
     on: true,
-    kind: 'jev',
+    kind: 'openai',
     appliesTo: ['thread_reply', 'trigger'],
     timeoutSeconds: 10,
     onError: 'wake',
-    jev: { question: 'Is this message a request this bot should answer?', threshold: 0.6 }
+    openai: SLACK_GATE_DEFAULT_RULES
   }
 }
 const gatePage = (width: number, language: UiLanguage = 'en') =>

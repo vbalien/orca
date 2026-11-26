@@ -1,16 +1,21 @@
-// The Jev config's rules: each names a question and one condition of its type, with an optional unsure band.
+// The gate config's rules: each names a question and one condition of its type, with an optional unsure band.
 import {
   isPlainObject,
-  type SlackGateJevPath,
-  type SlackGateJevQuestion
-} from './slack-gate-jev-config'
-import { finiteNumber, type Issues, onlyKeys } from './slack-gate-jev-issues'
+  type SlackGateQuestion,
+  type SlackGateRulesPath
+} from './slack-gate-rules-config'
+import { finiteNumber, type Issues, onlyKeys } from './slack-gate-rules-issues'
+
+/** The highest answer a number question gives: a probability, or the top level's index. */
+function topOf(question: Exclude<SlackGateQuestion, { type: 'choice' }>): number {
+  return question.type === 'predicate' ? 1 : Math.max(0, question.levels.length - 1)
+}
 
 function validateCondition(
   issues: Issues,
   condition: unknown,
-  path: SlackGateJevPath,
-  question: SlackGateJevQuestion | null
+  path: SlackGateRulesPath,
+  question: SlackGateQuestion | null
 ): void {
   if (!isPlainObject(condition)) {
     issues.add(path, 'not_object')
@@ -37,16 +42,19 @@ function validateCondition(
     }
     const seen = new Set<string>()
     choices.forEach((choice, index) => {
-      if (typeof choice !== 'string') {
-        issues.add([...path, kind, index], 'not_string')
-      } else if (!Object.hasOwn(question.criteria, choice)) {
-        issues.add([...path, kind, index], 'unknown_choice', { choice })
-      } else if (seen.has(choice)) {
-        issues.add([...path, kind, index], 'duplicate_choice', { choice })
+      const at = [...path, kind, index]
+      if (typeof choice !== 'string' && typeof choice !== 'boolean') {
+        issues.add(at, 'not_choice_value')
+        return
       }
-      if (typeof choice === 'string') {
-        seen.add(choice)
+      // A string and a boolean of the same text are different choices.
+      const id = `${typeof choice}:${String(choice)}`
+      if (!question.choices.some((entry) => entry.value === choice)) {
+        issues.add(at, 'unknown_choice', { choice: String(choice) })
+      } else if (seen.has(id)) {
+        issues.add(at, 'duplicate_choice', { choice: String(choice) })
       }
+      seen.add(id)
     })
     return
   }
@@ -56,7 +64,7 @@ function validateCondition(
   }
   const limit = condition[kind]
   if (finiteNumber(issues, limit, [...path, kind])) {
-    const max = question.type === 'noul' ? 1 : Math.max(0, question.criteria.length - 1)
+    const max = topOf(question)
     if (limit < 0 || limit > max) {
       issues.add([...path, kind], 'out_of_range', { min: 0, max })
     }
@@ -67,7 +75,7 @@ export function validateRule(
   issues: Issues,
   rule: unknown,
   index: number,
-  questions: Map<string, SlackGateJevQuestion | null>
+  questions: Map<string, SlackGateQuestion | null>
 ): string | null {
   const path = ['rules', index]
   if (!isPlainObject(rule)) {
@@ -98,7 +106,7 @@ export function validateRule(
     if (!isPlainObject(condition) || 'oneOf' in condition) {
       issues.add([...path, 'unsureFrom'], 'unsure_choice')
     } else if (question && question.type !== 'choice') {
-      const max = question.type === 'noul' ? 1 : Math.max(0, question.criteria.length - 1)
+      const max = topOf(question)
       const from = rule.unsureFrom
       const below = typeof condition.atLeast === 'number' && from < condition.atLeast
       const above = typeof condition.atMost === 'number' && from > condition.atMost
@@ -111,5 +119,3 @@ export function validateRule(
   }
   return typeof name === 'string' ? name : null
 }
-
-/** Checks an editable config (the mirror fields, when present, are ignored here). */

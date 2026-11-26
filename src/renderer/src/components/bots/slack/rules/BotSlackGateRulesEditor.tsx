@@ -1,5 +1,5 @@
-// The Jev gate's whole configuration as one JSON text: checked as it is typed, with examples, a short
-// field guide, what older Orca versions would do with it, and the request it sends for a sample message.
+// The OpenAI Decisions gate's whole configuration as one JSON text: checked as it is typed, with examples,
+// a short field guide, and the request it sends for a sample message.
 import React, { useId, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Maximize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -20,18 +20,18 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useTranslate } from '@/i18n/use-translate'
+import { SLACK_GATE_SEND_KEYS } from '../../../../../../shared/bots/slack-gate-rules-config'
+import { slackGateOpenAIRequest } from '../../../../../../shared/bots/slack-gate-openai-request'
 import {
-  narrowsLegacyDisclosure,
-  slackGateJevLegacyMirror,
-  SLACK_GATE_JEV_SEND_KEYS
-} from '../../../../../../shared/bots/slack-gate-jev-config'
-import { slackGateJevRequest } from '../../../../../../shared/bots/slack-gate-jev-request'
+  formatSlackGateRulesText,
+  parseSlackGateRulesText
+} from '../../../../../../shared/bots/slack-gate-rules-text'
 import {
-  formatSlackGateJevText,
-  parseSlackGateJevText
-} from '../../../../../../shared/bots/slack-gate-jev-text'
-import { slackGateJevExamples, slackGateJevSampleEvent } from './slack-gate-jev-examples'
-import { slackGateJevIssueText } from './slack-gate-jev-issue-text'
+  SLACK_GATE_RULES_EXAMPLES,
+  type SlackGateRulesExample
+} from '../../../../../../shared/bots/slack-gate-default-rules'
+import { SLACK_GATE_SAMPLE_EVENT } from './slack-gate-rules-examples'
+import { slackGateRulesIssueText } from './slack-gate-rules-issue-text'
 
 function Disclosure(props: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -76,7 +76,13 @@ function JsonText(props: {
   )
 }
 
-export function BotSlackGateJevEditor(props: {
+const EXAMPLE_LABELS: Record<SlackGateRulesExample['id'], [string, string]> = {
+  default: ['bots.slack.gate.rules.example.default', 'Default: skip replies not meant for the bot'],
+  smallTalk: ['bots.slack.gate.rules.example.smallTalk', 'Block small talk'],
+  topic: ['bots.slack.gate.rules.example.topic', 'Topic and urgency']
+}
+
+export function BotSlackGateRulesEditor(props: {
   text: string
   botName: string
   onChange: (text: string) => void
@@ -85,23 +91,24 @@ export function BotSlackGateJevEditor(props: {
   const id = useId()
   const statusId = `${id}-status`
   const [wide, setWide] = useState(false)
-  const parsed = useMemo(() => parseSlackGateJevText(props.text), [props.text])
-  const examples = slackGateJevExamples(t, props.botName)
-  const mirror = parsed.ok ? slackGateJevLegacyMirror(parsed.config) : null
+  const parsed = useMemo(() => parseSlackGateRulesText(props.text), [props.text])
+  const request = parsed.ok
+    ? slackGateOpenAIRequest(parsed.config, { name: props.botName }, SLACK_GATE_SAMPLE_EVENT)
+    : null
   const status = (elementId: string) =>
     parsed.ok ? (
       <p id={elementId} className="text-status-success">
-        {t('bots.slack.gate.jev.valid', 'Looks good.')}
+        {t('bots.slack.gate.rules.valid', 'Looks good.')}
       </p>
     ) : (
       <ul id={elementId} role="alert" className="flex flex-col gap-0.5 text-destructive">
         {parsed.issues.slice(0, 4).map((issue) => {
-          const text = slackGateJevIssueText(t, issue)
+          const text = slackGateRulesIssueText(t, issue)
           return <li key={`${issue.code}:${text}`}>{text}</li>
         })}
         {parsed.issues.length > 4 ? (
           <li>
-            {t('bots.slack.gate.jev.moreIssues', '…and {{count}} more.', {
+            {t('bots.slack.gate.rules.moreIssues', '…and {{count}} more.', {
               count: parsed.issues.length - 4
             })}
           </li>
@@ -112,17 +119,17 @@ export function BotSlackGateJevEditor(props: {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="xs" variant="outline">
-          {t('bots.slack.gate.jev.insertExample', 'Insert example')}
+          {t('bots.slack.gate.rules.insertExample', 'Insert example')}
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {examples.map((example) => (
+        {SLACK_GATE_RULES_EXAMPLES.map((example) => (
           <DropdownMenuItem
             key={example.id}
-            onSelect={() => props.onChange(formatSlackGateJevText(example.config))}
+            onSelect={() => props.onChange(formatSlackGateRulesText(example.config))}
           >
-            {example.label}
+            {t(...EXAMPLE_LABELS[example.id])}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -132,13 +139,15 @@ export function BotSlackGateJevEditor(props: {
     // The opener is the dialog's trigger, so closing the larger editor returns focus to it.
     <Dialog open={wide} onOpenChange={setWide}>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor={`${id}-json`}>{t('bots.slack.gate.jev.label', 'Jev rules (JSON)')}</Label>
+        <Label htmlFor={`${id}-json`}>
+          {t('bots.slack.gate.rules.label', 'OpenAI Decisions rules (JSON)')}
+        </Label>
         <div className="flex flex-wrap gap-1.5">
           {examplesMenu}
           <DialogTrigger asChild>
             <Button size="xs" variant="outline">
               <Maximize2 />
-              {t('bots.slack.gate.jev.openLarger', 'Open larger')}
+              {t('bots.slack.gate.rules.openLarger', 'Open larger')}
             </Button>
           </DialogTrigger>
         </div>
@@ -150,64 +159,49 @@ export function BotSlackGateJevEditor(props: {
           onChange={props.onChange}
         />
         {status(statusId)}
-        {mirror ? (
-          <p className="leading-5 text-muted-foreground">
-            {t(
-              'bots.slack.gate.jev.olderVersions',
-              'Older Orca versions use only: “{{question}}” at ≥ {{threshold}}; criteria, other questions and rules are ignored.',
-              { question: mirror.question, threshold: mirror.threshold }
-            )}
-            {parsed.ok && narrowsLegacyDisclosure(parsed.config)
-              ? ` ${t(
-                  'bots.slack.gate.jev.olderVersionsSend',
-                  'They also ignore "send": the message and the thread around it are sent to TypeSafe.'
-                )}`
-              : null}
-          </p>
-        ) : null}
-        <Disclosure title={t('bots.slack.gate.jev.help', 'Fields')}>
+        <Disclosure title={t('bots.slack.gate.rules.help', 'Fields')}>
           <ul className="flex list-disc flex-col gap-1 pl-4 leading-5 text-muted-foreground">
             <li>
               {t(
-                'bots.slack.gate.jev.helpQuestions',
-                '"questions": TypeSafe questions by name — noul (yes/no, criteria true/false), choice (criteria: name → description) or score (criteria: levels, lowest first).'
+                'bots.slack.gate.rules.helpMentions',
+                'The default rules suit replies in a thread; mentions wake without a check. Through Orca Cloud, a mention in a thread the bot has no chat in can’t be told from a reply and is checked, and a very short one can read as not meant for the bot.'
               )}
             </li>
             <li>
               {t(
-                'bots.slack.gate.jev.helpSend',
-                '"send": what Jev gets about the message, each true/false; earlierMessages and laterMessages may be a number (keep the last N). Leave it out for the default. Keys: {{keys}}.',
-                { keys: SLACK_GATE_JEV_SEND_KEYS.join(', ') }
+                'bots.slack.gate.rules.helpQuestions',
+                '"questions": a list of OpenAI Decisions questions, each with a unique "name" and "instructions" — predicate (yes/no, answered as a probability 0–1), choice ("choices": [{ "value", "description" }], values text or true/false) or score ("levels": [{ "label", "description" }], lowest first; answered 0 to levels − 1).'
               )}
             </li>
             <li>
               {t(
-                'bots.slack.gate.jev.helpExtra',
+                'bots.slack.gate.rules.helpSend',
+                '"send": what OpenAI gets about the message, each true/false; earlierMessages and laterMessages may be a number (keep the last N); earlierSpeakers marks each earlier message from this_bot, app, person or note. Leave it out for the default. Keys: {{keys}}.',
+                { keys: SLACK_GATE_SEND_KEYS.join(', ') }
+              )}
+            </li>
+            <li>
+              {t(
+                'bots.slack.gate.rules.helpExtra',
                 '"extra": fixed values sent along, e.g. what the bot does.'
               )}
             </li>
             <li>
               {t(
-                'bots.slack.gate.jev.helpRules',
+                'bots.slack.gate.rules.helpRules',
                 '"rules": { "question", "wakeIf" or "blockIf": { "atLeast" | "atMost": n } or { "oneOf": [choices] }, optional "unsureFrom": n }. Any passing blockIf blocks; wakeIf rules combine by "combine" (all | any); "whenUnsure" (block | wake) decides the band between unsureFrom and the limit.'
               )}
             </li>
           </ul>
         </Disclosure>
-        <Disclosure title={t('bots.slack.gate.jev.preview', 'Request preview')}>
-          {parsed.ok ? (
+        <Disclosure title={t('bots.slack.gate.rules.preview', 'Request preview')}>
+          {request ? (
             <pre className="max-h-64 overflow-auto scrollbar-sleek rounded-md bg-muted p-2 font-mono text-3xs">
-              {formatSlackGateJevText(
-                slackGateJevRequest(
-                  parsed.config,
-                  { name: props.botName },
-                  slackGateJevSampleEvent(t)
-                )
-              )}
+              {formatSlackGateRulesText(request)}
             </pre>
           ) : (
             <p className="text-muted-foreground">
-              {t('bots.slack.gate.jev.previewInvalid', 'Fix the JSON to see the request.')}
+              {t('bots.slack.gate.rules.previewInvalid', 'Fix the JSON to see the request.')}
             </p>
           )}
         </Disclosure>
@@ -216,10 +210,13 @@ export function BotSlackGateJevEditor(props: {
           className="max-h-[calc(100vh-4rem)] sm:max-w-[min(56rem,calc(100vw-4rem))]"
         >
           <DialogTitle id={`${id}-wide-title`}>
-            {t('bots.slack.gate.jev.label', 'Jev rules (JSON)')}
+            {t('bots.slack.gate.rules.label', 'OpenAI Decisions rules (JSON)')}
           </DialogTitle>
           <DialogDescription>
-            {t('bots.slack.gate.jev.dialogHelp', 'Changes here are the same text as in the card.')}
+            {t(
+              'bots.slack.gate.rules.dialogHelp',
+              'Changes here are the same text as in the card.'
+            )}
           </DialogDescription>
           <div className="flex min-h-0 flex-col gap-3">
             <div>{examplesMenu}</div>

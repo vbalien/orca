@@ -445,5 +445,9 @@
   {
     "filePath": "src/shared/bots/bot-item-ask-advice.ts",
     "reason": "Agent mail for item asks."
+  },
+  {
+    "filePath": "src/shared/bots/slack-gate-default-rules.ts",
+    "reason": "Fork: the Slack wake gate's rules are English data OpenAI reads, whatever the UI language."
   }
 ]

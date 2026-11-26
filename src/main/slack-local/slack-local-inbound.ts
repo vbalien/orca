@@ -15,6 +15,11 @@ import {
   type LocalSlackMessage
 } from './slack-local-events'
 import type { LocalSlackThreadMessage } from './slack-local-reads'
+import {
+  gateContextWanted,
+  SlackLocalGateContext,
+  type SlackLocalRecentThread
+} from './slack-local-gate-context'
 import { localSlackGateEvent, type LocalSlackWakeGate } from './slack-local-wake-gate'
 
 export const BARE_MENTION_TEXT = '(mentioned you with no message)'
@@ -35,6 +40,8 @@ export type SlackLocalReads = {
     channelId: string,
     threadTs: string
   ) => Promise<{ messages: LocalSlackThreadMessage[]; complete: boolean }>
+  /** What came right before a message, for an OpenAI gate in a running chat's thread. */
+  recentThread?: SlackLocalRecentThread
   userName: (userId: string) => Promise<string | undefined>
 }
 
@@ -88,8 +95,18 @@ export class SlackLocalInbound {
   private readonly seenMessages = new BoundedKeys(2_000)
   private readonly threads = new Map<string, { tail: Promise<void>; waiting: number }>()
   private waiting = 0
+  private readonly gateContext: SlackLocalGateContext | null
 
-  constructor(private readonly deps: SlackLocalInboundDeps) {}
+  constructor(private readonly deps: SlackLocalInboundDeps) {
+    this.gateContext = deps.reads.recentThread
+      ? new SlackLocalGateContext({
+          recentThread: deps.reads.recentThread,
+          botUserId: deps.identity.botUserId,
+          signal: deps.signal,
+          ...(deps.now ? { now: deps.now } : {})
+        })
+      : null
+  }
 
   /** An events_api payload, already acknowledged to Slack. */
   receive(payload: unknown): void {
@@ -150,7 +167,16 @@ export class SlackLocalInbound {
       return
     }
     const { asker, historyUnknown, truncated } = await this.asker(message, role, linked)
-    const event = localSlackGateEvent({ message, asker, historyUnknown, truncated })
+    // A running chat reads no thread for itself; an OpenAI gate that sends earlier messages needs it.
+    const wanted = linked && this.gateContext ? gateContextWanted(bot, message) : 0
+    const gateContext = wanted > 0 ? await this.gateContext?.read(message, wanted) : undefined
+    const event = localSlackGateEvent({
+      message,
+      asker,
+      historyUnknown,
+      truncated,
+      ...(gateContext ? { gateContext } : {})
+    })
     if ((await this.decide(bot, event)) !== 'wake' || this.deps.signal.aborted) {
       return
     }

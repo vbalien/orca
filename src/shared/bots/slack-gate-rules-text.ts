@@ -1,4 +1,4 @@
-// The Jev gate config as the owner types it: strict JSON, size and nesting checked before parsing,
+// The gate rules config as the owner types it: strict JSON, size and nesting checked before parsing,
 // duplicate keys refused, and every problem placed on a line of the text.
 import {
   findNodeAtLocation,
@@ -8,20 +8,20 @@ import {
   type ParseError
 } from 'jsonc-parser'
 import type {
-  SlackGateJevConfig,
-  SlackGateJevIssue,
-  SlackGateJevPath
-} from './slack-gate-jev-config'
-import { validateSlackGateJev } from './slack-gate-jev-validate'
+  SlackGateRulesConfig,
+  SlackGateRulesIssue,
+  SlackGateRulesPath
+} from './slack-gate-rules-config'
+import { validateSlackGateRules } from './slack-gate-rules-validate'
 
-export const SLACK_GATE_JEV_TEXT_MAX_BYTES = 64 * 1024
+export const SLACK_GATE_RULES_TEXT_MAX_BYTES = 64 * 1024
 // Above the config's own depth limit: this only keeps the parser off pathological input.
 const TEXT_MAX_DEPTH = 12
 
-export type SlackGateJevTextIssue = SlackGateJevIssue & { line?: number }
-export type SlackGateJevTextResult =
-  | { ok: true; config: SlackGateJevConfig }
-  | { ok: false; issues: SlackGateJevTextIssue[] }
+export type SlackGateRulesTextIssue = SlackGateRulesIssue & { line?: number }
+export type SlackGateRulesTextResult =
+  | { ok: true; config: SlackGateRulesConfig }
+  | { ok: false; issues: SlackGateRulesTextIssue[] }
 
 /** 1-based line of a text offset. */
 export function lineAt(text: string, offset: number): number {
@@ -88,7 +88,7 @@ function duplicateKey(tree: Node): { key: string; offset: number } | null {
 }
 
 /** The line of a path's node, or of its nearest existing ancestor when the node is missing. */
-export function lineOfPath(text: string, tree: Node, path: SlackGateJevPath): number {
+export function lineOfPath(text: string, tree: Node, path: SlackGateRulesPath): number {
   for (let length = path.length; length >= 0; length--) {
     const node = findNodeAtLocation(tree, path.slice(0, length))
     if (node) {
@@ -100,11 +100,13 @@ export function lineOfPath(text: string, tree: Node, path: SlackGateJevPath): nu
   return 1
 }
 
-export function parseSlackGateJevText(text: string): SlackGateJevTextResult {
-  if (new TextEncoder().encode(text).length > SLACK_GATE_JEV_TEXT_MAX_BYTES) {
+export function parseSlackGateRulesText(text: string): SlackGateRulesTextResult {
+  if (new TextEncoder().encode(text).length > SLACK_GATE_RULES_TEXT_MAX_BYTES) {
     return {
       ok: false,
-      issues: [{ path: [], code: 'text_too_large', params: { max: SLACK_GATE_JEV_TEXT_MAX_BYTES } }]
+      issues: [
+        { path: [], code: 'text_too_large', params: { max: SLACK_GATE_RULES_TEXT_MAX_BYTES } }
+      ]
     }
   }
   const deep = tooDeepAt(text)
@@ -154,7 +156,7 @@ export function parseSlackGateJevText(text: string): SlackGateJevTextResult {
   } catch {
     return { ok: false, issues: [{ path: [], code: 'syntax', line: 1 }] }
   }
-  const result = validateSlackGateJev(value)
+  const result = validateSlackGateRules(value)
   if (result.ok) {
     return result
   }
@@ -170,15 +172,15 @@ export function parseSlackGateJevText(text: string): SlackGateJevTextResult {
 
 /** A config as the editor shows it: indented, or compact when indenting would pass the text limit, so
  *  every config the host accepts opens again as text the editor accepts. */
-export function formatSlackGateJevText(value: unknown): string {
+export function formatSlackGateRulesText(value: unknown): string {
   const pretty = JSON.stringify(value, null, 2)
-  return new TextEncoder().encode(pretty).length <= SLACK_GATE_JEV_TEXT_MAX_BYTES
+  return new TextEncoder().encode(pretty).length <= SLACK_GATE_RULES_TEXT_MAX_BYTES
     ? pretty
     : JSON.stringify(value)
 }
 
 /** `rules[2].wakeIf.atLeast` for a path. */
-export function formatSlackGateJevPath(path: SlackGateJevPath): string {
+export function formatSlackGateRulesPath(path: SlackGateRulesPath): string {
   return path.reduce<string>(
     (joined, part) =>
       typeof part === 'number' ? `${joined}[${part}]` : joined ? `${joined}.${part}` : part,
