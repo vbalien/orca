@@ -26,6 +26,7 @@ import { SLACK_GATE_DEFAULT_RULES } from '../../shared/bots/slack-gate-default-r
 import { ConnectorDeliveryAcks } from './connector-delivery-acks'
 import { dispatchDelivery, type DispatchMachine } from './connector-deliveries'
 import { createConnectorWakeGate, type WakeGateBot } from './connector-wake-gate'
+import { connectorDeliveryUnits } from './connector-delivery-batches'
 import { slackGateCaseOf } from './connector-wake-gate-event'
 import { fakeMachine } from './fake-connector-seam.test-fixture'
 
@@ -151,7 +152,8 @@ const HOST: ExternalConversationHost = {
 function connector(
   store: ReturnType<typeof createStore>,
   bots: WakeGateBot[],
-  decide: typeof decideSlackWake
+  decide: typeof decideSlackWake,
+  mentionsKnown = true
 ) {
   const receipts = new DeliveryReceipts(() => orchestration)
   const seam = new ExternalConversationSeam({
@@ -165,7 +167,7 @@ function connector(
     bots: () => bots,
     botsEnabled: () => true,
     linkedBot: (key) => findLink(store, key)?.link.bot?.botId ?? null,
-    mentionsKnown: () => true,
+    mentionsKnown: () => mentionsKnown,
     heldStart: (key) => receipts.heldStart(key),
     decide
   })
@@ -185,12 +187,22 @@ const verdict = (wake: boolean): SlackWakeDecision => ({
 const deciding = (wake: boolean) => vi.fn<typeof decideSlackWake>(async () => verdict(wake))
 
 describe('classification', () => {
-  it('marks only a thread-root start as a sure mention, and in-thread starts as unknown', () => {
+  it('marks a thread-root or bare-mention start as a sure mention, and other starts as unknown', () => {
     expect(slackGateCaseOf(start(FRESH), true)).toEqual({ case: 'mention' })
     expect(slackGateCaseOf(start(FRESH, { asker: asker('1800000000.000700') }), true)).toEqual({
       case: 'thread_reply',
       mentionUnknown: true
     })
+    expect(
+      slackGateCaseOf(start(FRESH, { asker: asker('1800000000.000700'), bareMention: true }), true)
+    ).toEqual({ case: 'mention' })
+    const { messageRef: _ref, ...unplaced } = asker('1800000000.000700')
+    for (const where of [{ asker: undefined }, { asker: unplaced }]) {
+      expect(slackGateCaseOf(start(FRESH, where), true)).toEqual({
+        case: 'mention',
+        mentionUnknown: true
+      })
+    }
     expect(slackGateCaseOf(start(DM, { asker: asker('1.2', 'direct_message') }), true)).toEqual({
       case: 'dm'
     })
@@ -555,13 +567,11 @@ describe('the default OpenAI gate on the cloud path', () => {
     }
   })
 
-  it('judges a batch by every message in it, and checks a start whose mention is unknown', async () => {
+  it('judges a batch by every message in it', async () => {
     const gated = openai()
     const store = await home()
-    const { wakeGate, deliver } = connector(
-      store,
-      [bot({ slackGate: gated.slackGate })],
-      (b, e, o) => gated.decider.decide(b, e, o)
+    const { wakeGate } = connector(store, [bot({ slackGate: gated.slackGate })], (b, e, o) =>
+      gated.decider.decide(b, e, o)
     )
     const head = send(LINKED, { asker: { ...asker('1800000000.000600'), text: 'thanks!' } })
     const next = send(LINKED, {
@@ -573,10 +583,103 @@ describe('the default OpenAI gate on the cloud path', () => {
       message: 'thanks!',
       laterMessages: ['and can you check the deploy?']
     })
-    // A start inside an existing thread may be a mention the cloud can't mark: it is checked.
-    const inThread = start(FRESH, { asker: asker('1800000000.000700') })
+    expect(gated.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  // Two characters, as a short mention reads once the bot's own mention is gone from it.
+  const short = (ts: string) => ({ ...asker(ts), text: '빌드' })
+  const scored = async (
+    appliesTo: BotSlackGate['appliesTo'],
+    deliveries: (Start | Send)[],
+    mentionsKnown = true
+  ) => {
+    const gated = openai()
+    const store = await home()
+    const { deliver } = connector(
+      store,
+      [bot({ slackGate: { ...gated.slackGate, appliesTo } })],
+      (b, e, o) => gated.decider.decide(b, e, o),
+      mentionsKnown
+    )
+    const results: boolean[] = []
+    for (const delivery of deliveries) {
+      gated.replies.push({ probability: 0.1 })
+      results.push(JSON.stringify(await deliver(delivery)) === JSON.stringify(held))
+    }
+    await closeTestStores()
+    return { held: results, asked: gated.fetch.mock.calls.length }
+  }
+
+  it('never checks a mention by default, even one too short to score, or one it cannot be sure of', async () => {
+    const inThread = start(FRESH, { asker: short('1800000000.000700') })
+    const bare = start(FRESH, { asker: short('1800000000.000710'), bareMention: true })
+    const mentioned = send(LINKED, { asker: short('1800000000.000720'), mentioned: true })
+    // Without the cloud's mention mark, a reply may be a mention too.
+    const unknown = send(LINKED, { asker: short('1800000000.000730') })
+    expect(await scored(['thread_reply'], [inThread, bare, mentioned])).toEqual({
+      held: [false, false, false],
+      asked: 0
+    })
+    expect(await scored(['thread_reply'], [unknown], false)).toEqual({ held: [false], asked: 0 })
+    // A reply the cloud says is no mention is checked.
+    expect(await scored(['thread_reply'], [unknown])).toEqual({ held: [true], asked: 1 })
+  })
+
+  it('checks a message it cannot place only when both mentions and replies are checked', async () => {
+    const inThread = () => start(FRESH, { asker: asker('1800000000.000700') })
+    const unknown = () => send(LINKED)
+    expect(await scored(['mention'], [inThread()])).toEqual({ held: [false], asked: 0 })
+    expect(await scored(['mention'], [unknown()], false)).toEqual({ held: [false], asked: 0 })
+    expect(await scored(['mention', 'thread_reply'], [inThread()])).toEqual({
+      held: [true],
+      asked: 1
+    })
+    expect(await scored(['mention', 'thread_reply'], [unknown()], false)).toEqual({
+      held: [true],
+      asked: 1
+    })
+    // A sure mention is checked once the owner checks mentions.
+    const bare = start(FRESH, { asker: asker('1800000000.000710'), bareMention: true })
+    expect(await scored(['mention'], [bare])).toEqual({ held: [true], asked: 1 })
+  })
+
+  it('keeps a mention out of a checked reply batch, so the reply verdict never holds it', async () => {
+    const gated = openai()
+    const store = await home()
+    const { wakeGate } = connector(store, [bot({ slackGate: gated.slackGate })], (b, e, o) =>
+      gated.decider.decide(b, e, o)
+    )
+    const reply = (ts: string, text: string, extra: Partial<Send> = {}) =>
+      send(LINKED, { asker: { ...asker(ts), text }, ...extra })
+    const signal = new AbortController().signal
+    const verdictOf = (head: Start | Send, later: Send[]) =>
+      wakeGate.wakeGate(head, later, DEADLINE)?.(signal, { botId: 'bot1' }) ?? null
+    const cases: [Start | Send, Send][] = [
+      [
+        reply('1800000000.000600', 'thanks!'),
+        reply('1800000000.000610', '빌드', { mentioned: true })
+      ],
+      [
+        start(FRESH, { asker: { ...asker('1800000000.000700'), text: '빌드' } }),
+        send(FRESH, { asker: { ...asker('1800000000.000710'), text: 'thanks!' } })
+      ]
+    ]
+    for (const [first, second] of cases) {
+      const units = connectorDeliveryUnits([first, second], () => false, wakeGate.wakeGateApart)
+      expect(units.map((unit) => ('batch' in unit ? unit.batch.length : 0))).toEqual([1, 1])
+      const mention = first.kind === 'start' ? first : second
+      const plain = first.kind === 'start' ? second : first
+      const asked = gated.fetch.mock.calls.length
+      expect(await verdictOf(mention, [])).toBeNull()
+      expect(gated.fetch.mock.calls.length).toBe(asked)
+      gated.replies.push({ probability: 0.1 })
+      expect(await verdictOf(plain, [])).toEqual(held)
+      expect(gated.data(asked)).toMatchObject({ message: 'thanks!' })
+      expect(gated.data(asked)).not.toHaveProperty('laterMessages')
+    }
+    // Riding together instead, the mention would share the reply's verdict.
     gated.replies.push({ probability: 0.1 })
-    expect(await deliver(inThread)).toEqual(held)
-    expect(gated.fetch).toHaveBeenCalledTimes(2)
+    const [plain, mention] = cases[0]!
+    expect(await verdictOf(plain, [mention])).toEqual(held)
   })
 })

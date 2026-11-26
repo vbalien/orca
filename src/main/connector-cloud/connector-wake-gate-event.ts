@@ -44,15 +44,19 @@ export function slackGateCaseOf(delivery: StartOrSend, mentionsKnown: boolean): 
   if (isDm(delivery)) {
     return { case: 'dm' }
   }
+  if (delivery.bareMention) {
+    return { case: 'mention' }
+  }
   if (delivery.kind === 'start') {
-    // A start carries no mention mark: only the thread's root message is surely a fresh mention.
+    // A start has no `mentioned` mark: past a bare mention, only the thread's root message is
+    // surely a mention. A start in a thread may also be a reply whose chat was gone or unlinked.
     const { threadTs } = slackPlace(delivery.conversation.externalId)
     const messageTs = messageTsOf(delivery.asker)
     return threadTs && messageTs === threadTs
       ? { case: 'mention' }
       : { case: messageTs ? 'thread_reply' : 'mention', mentionUnknown: true }
   }
-  if (delivery.mentioned || delivery.bareMention) {
+  if (delivery.mentioned) {
     return { case: 'mention' }
   }
   return mentionsKnown ? { case: 'thread_reply' } : { case: 'thread_reply', mentionUnknown: true }
