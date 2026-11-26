@@ -3,10 +3,14 @@ name: Fork Release
 # Fork-only (vbalien/orca): pushing a fork-v<X.Y.Z>-<N> tag builds macOS, Linux and Windows installers from
 # that tag's commit and opens a draft release on vbalien/orca. A person publishes the draft after checking it
 # (fork/README.md). No secrets: unsigned builds, GITHUB_TOKEN only. Upstream release workflows stay untouched.
+# Manual run (`gh workflow run fork-release.yml --repo github.com/vbalien/orca --ref fork-vX.Y.Z-N`) rebuilds
+# an existing tag without re-pushing it; GitHub reads the workflow from that tag, so only tags made after this
+# trigger existed can be dispatched. A tag ref is required and a published release is refused before building.
 on:
   push:
     tags:
       - 'fork-v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,8 +46,18 @@ jobs:
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          [[ "$GITHUB_REF" == refs/tags/fork-v* ]] ||
+            { echo "::error::run this on a fork-vX.Y.Z-N tag (got $GITHUB_REF)"; exit 1; }
+          # A published release is never rebuilt (a rerun by mistake would waste every build).
+          if state=$(timeout -k 5 60 gh release view "$TAG" --repo "github.com/$REPO" --json isDraft --jq .isDraft 2>err.txt); then
+            [[ "$state" == true ]] || { echo "::error::$TAG is already published; use the next release number"; exit 1; }
+          elif ! grep -q 'release not found' err.txt; then
+            echo "::error::could not read the release state of $TAG: $(head -c 300 err.txt)"; exit 1
+          fi
           [[ "$TAG" =~ ^fork-v([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$ ]] ||
             { echo "::error::tag must look like fork-vX.Y.Z-N: $TAG"; exit 1; }
           version=${BASH_REMATCH[1]}

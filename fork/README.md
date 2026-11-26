@@ -6,9 +6,10 @@
 
 - 업스트림은 main에서 `release/vX.Y.Z` 브랜치를 따서 cherry-pick·되돌림을 얹고, `Cut Release` 워크플로가 그 위에 `release: vX.Y.Z` 커밋과 태그를 단다. 그래서 **릴리즈 태그는 main 위에 있지 않다**. 거의 하루에 한 번 나온다. 태그 → GitHub Release 게시 → AUR `orca-ide-bin` 갱신 순이다(게시되지 않는 태그도 있다).
 - 릴리즈마다 브랜치 `fork/vX.Y.Z` 하나를 둔다. 업스트림 태그 `vX.Y.Z` 위에 패치 묶음을 얹은 것이다.
-  - 패치 묶음 = `git log --oneline vX.Y.Z..fork/vX.Y.Z`. 순서는 고정이다.
-  - 첫 커밋 `fork: tooling, docs and release workflow`(이 폴더와 `.github/workflows/fork-release.yml`), `fork: disable self-update`, 기능 패치(PR 하나에 커밋 하나), 맨 위 `fork: regenerate generated files`.
-  - 맨 위 커밋은 생성 파일만 담는다(`src/renderer/src/i18n/en-runtime-required.json`, `src/shared/rpc-contract/rpc-params-catalog.generated.ts`, `src/shared/plugins/languages/protected-copy-keys.json`). 스크립트가 다시 만든다(맨 위가 아니거나 내용이 달라지면 빼고 새로 만들고, 맨 위에 있고 내용이 같으면 그대로 둔다). 기능 패치는 생성 파일을 커밋하지 않는다.
+  - 패치 묶음 = `git log --oneline vX.Y.Z..fork/vX.Y.Z`.
+  - 새 업스트림 버전으로 옮길 때의 순서: 첫 커밋 `fork: tooling, docs and release workflow`(이 폴더와 `.github/workflows/fork-release.yml`), `fork: disable self-update`, 기능 패치(PR 하나에 커밋 하나), 맨 위 `fork: regenerate generated files`.
+  - 재생성 커밋은 생성 파일만 담는다(`src/renderer/src/i18n/en-runtime-required.json`, `src/shared/rpc-contract/rpc-params-catalog.generated.ts`, `src/shared/plugins/languages/protected-copy-keys.json`). 새 기반으로 옮길 때는 묶음 안의 재생성 커밋을 모두 빼고 맨 위에 새로 만든다. 기능 패치도 생성 파일을 바꿀 수 있다(그 변경은 맨 위 재생성 커밋이 최종값으로 덮는다).
+  - **이미 origin에 올라간 `fork/vX.Y.Z`를 같은 버전으로 다시 낼 때**(`--release N+1`)는 브랜치를 다시 쓰지 않는다: 재정렬·amend 없이 그 위에 쌓으므로, 중간에 예전 재생성 커밋이 남고 맨 위에 새 재생성 커밋이 하나 더 생길 수 있다. 정상이다(다음 업스트림 버전으로 옮길 때 정리된다).
 - 포크 릴리즈는 태그 `fork-vX.Y.Z-N`(같은 기준으로 다시 내면 N을 올린다). 앱 버전은 업스트림과 같은 `X.Y.Z`다.
 - 포크 빌드는 앱 자체 업데이트를 끈다(업스트림 새 버전으로 올라가 패치가 사라지지 않게). 업스트림의 원격 정책 데이터는 계속 받는다. 새 버전은 이 절차로 다시 만든다.
 
@@ -18,12 +19,18 @@
 fork/rebase-onto-release.sh v1.4.276 --release 1
 ```
 
-1. 기본 출발점은 origin의 `fork/v*` 중 가장 높은 버전이다. 다른 것은 `--from <브랜치>`. 옛 기반은 출발점에서 가장 가까운 업스트림 릴리즈 태그로 찾는다.
+1. 기본 출발점은 origin/main이다(= 게시된 최신 포크 릴리즈 + 그 뒤 main에 병합된 패치). origin의 main을 명시적으로 가져오고, vbalien/orca의 Latest 릴리즈 태그 커밋이 main에 들어 있어야 한다(아니면 멈춘다: `fork/sync-main.sh <그 태그>`로 main을 맞추거나 `--from <브랜치>`). 옛 기반은 출발점에서 가장 가까운 업스트림 릴리즈 태그로 찾는다. 이미 origin에 `fork/<새태그>`가 있으면 그것을 이어서 한다(재정렬·amend 없이, push는 fast-forward만).
 2. `~/orca-fork-build/src/v1.4.276`에 작업 공간(git worktree)을 만들고 `fork/v1.4.276`으로 패치를 옮긴다.
 3. 충돌이 나면 멈추고 커밋과 파일을 알려 준다(종료 코드 2). 그 작업 공간에서 풀고 `git add` → `git rebase --continue`를 끝낸 뒤 같은 명령을 다시 실행하면 이어서 한다. 릴리즈에 없는 main 코드에 기대는 부분은 릴리즈 쪽 코드에 맞춘다. 기능을 바꾸거나 줄여야 하면 거기서 멈춘다.
 4. 생성 파일 재생성 → `pnpm check:changed --base=v1.4.276` → `pnpm build:unpack` → 리눅스용 원격 서버 템플릿 → 이 컴퓨터용 시험 포장(`~/orca-fork-build/v1.4.276-<SHA>/`).
 5. `--release 1`이면 이어서 `fork/v1.4.276`을 origin에 올리고 태그 `fork-v1.4.276-1`을 push한다. 태그가 `.github/workflows/fork-release.yml`을 돌려 맥·리눅스·윈도우 설치 파일을 만들고 **초안** 릴리즈를 만든다. 스크립트는 그 실행을 기다렸다가 초안 주소를 알려 준다. 중간에 끊기면 같은 명령을 다시 실행하면 이어서 한다.
-6. 초안을 확인한 뒤(아래) 게시한다: `fork/publish-release.sh fork-v1.4.276-1 --screens-checked`(화면 확인을 마쳤다는 뜻이다. 검증 때 기록한 자산과 지금 초안이 같을 때만 게시한다. 게시 직전에 업스트림의 게시된 최신 릴리즈를 다시 보고, 기준보다 새 버전이 게시돼 있으면 멈추고 그 버전으로 다시 내라고 알린다. 게시한 릴리즈는 포크의 Latest가 된다).
+6. 초안을 확인한 뒤(아래) 게시한다: `fork/publish-release.sh fork-v1.4.276-1 --screens-checked`(화면 확인을 마쳤다는 뜻이다). 게시 스크립트는:
+   - 검증 때 기록한 자산과 지금 초안이 같을 때만 게시한다.
+   - 업스트림의 게시된 최신 릴리즈가 기준보다 새것이면, 또 포크의 지금 Latest보다 오래된 태그면 게시하지 않는다.
+   - 같은 컴퓨터에서 게시·main 동기화는 잠금(`~/orca-fork-build/publish.lock`)으로 하나씩만 돈다(다른 컴퓨터에서 동시에 게시하는 경우는 다루지 않는다 — 혼자 쓰는 포크).
+   - 게시 요청 전에 `~/orca-fork-build/publish-pending`을 남기고 게시가 확인되면 지운다. 결과가 미확정이면(종료 2) 그 파일이 남아 다음 게시·동기화를 막는다: `gh release view <태그> --repo github.com/vbalien/orca --json isDraft`로 확인해, 게시됐으면 `fork/sync-main.sh <태그>`, 아직 초안이면 파일을 지우고 다시.
+   - 게시가 확인되면 `fork/sync-main.sh`로 main을 그 릴리즈로 맞춘다(아래 "포크 main"). 이 단계가 멈추면 릴리즈는 게시된 채로 종료 1(이유를 보고 `fork/sync-main.sh <태그> …`), 결과가 미확정이면 종료 2.
+7. 수동 실행: 태그를 다시 밀지 않고 처음부터 다시 빌드하려면 `gh workflow run fork-release.yml --repo github.com/vbalien/orca --ref fork-vX.Y.Z-N`. GitHub은 기본 브랜치(main)에 워크플로 파일이 있어야 받고, 실행은 그 태그의 워크플로로 돈다 — 이 기능이 들어간 커밋 이후의 태그부터 쓸 수 있다(fork-v1.4.277-1은 안 된다). 이미 게시된 태그면 빌드 전에 멈춘다.
 
 필요한 것:
 
@@ -52,9 +59,13 @@ fork/rebase-onto-release.sh v1.4.276 --release 1
 
 ## 새 패치 더하기
 
-1. 지금 쓰는 `fork/vX.Y.Z`를 기준으로 작업 브랜치를 만들고 PR을 그 브랜치로 연다.
-2. 생성 파일 변경은 커밋하지 않는다(커밋해도 스크립트가 다시 만든다).
-3. squash로 합친 뒤 로컬 `fork/vX.Y.Z`를 origin에 맞추고 같은 태그로 스크립트를 다시 돌린다: `fork/rebase-onto-release.sh vX.Y.Z --release <다음 N>`. 재생성 커밋이 맨 위로 정리되고 검사·빌드·릴리즈를 한다.
+1. origin/main(= 게시된 최신 포크 릴리즈)에서 작업 브랜치를 딴다. PR은 `--repo vbalien/orca --base main`.
+2. **squash로 병합한다**(merge 커밋 금지: 패치 묶음은 선형이어야 하고, sync-main.sh는 main에 merge 커밋이 있으면 멈춘다). 생성 파일(`en-runtime-required.json`, `rpc-params-catalog.generated.ts`, `protected-copy-keys.json`)은 바꿔도 된다 — 다음 릴리즈 때 스크립트가 새 기반 쪽으로 풀고 맨 위 재생성 커밋에서 다시 만든다.
+3. 다음 릴리즈에 들어가는 방법:
+   - **새 업스트림 버전**: `fork/rebase-onto-release.sh v<새 버전> --release 1`이 origin/main에서 출발하므로 병합된 패치가 그대로 새 스택에 들어간다.
+   - **같은 업스트림 버전으로 다시**(예: fork-v1.4.277-2): `fork/v1.4.277`은 이미 있어 스크립트가 그 브랜치를 이어서 쓴다(main에서 출발하지 않음). 그 작업 공간에서 병합 커밋을 옮긴 뒤 다음 번호로 낸다:
+     `git -C ~/orca-fork-build/src/v1.4.277 fetch origin main && git -C ~/orca-fork-build/src/v1.4.277 cherry-pick <main의 squash 커밋>` → `fork/rebase-onto-release.sh v1.4.277 --release 2`(재생성 커밋을 새로 쌓고, 브랜치는 fast-forward로 올린다).
+4. 게시 뒤 main은 새 릴리즈로 바뀐다. 그 릴리즈에 없는 main 커밋(예: 릴리즈를 만든 뒤 병합한 PR)이 있으면 sync-main.sh가 멈추고 목록을 보여 준다 — 그 커밋을 다음 릴리즈에 넣은 뒤 다시 맞춘다. 이식하면서 충돌로 내용이 바뀐 커밋은 자동 통과하지 않는다: 안내된 `git range-diff`·`git diff`로 확인한 뒤 `fork/sync-main.sh <태그> --confirm-ported <SHA>`(업스트림에 흡수된 경우 `--confirm-upstream <포크SHA>=<업스트림SHA>`).
 
 ## 정리
 
@@ -76,9 +87,13 @@ fork/rebase-onto-release.sh v1.4.276 --release 1
 
 ## 포크 main
 
-아직 정하지 않았다(지금은 업스트림 main + 패치). 제안은 "main = 최신 `fork/vX.Y.Z`"(릴리즈마다 `--force-with-lease`로 갱신)다. 릴리즈 워크플로는 태그로 돌아서 main과 상관없다.
+- **main = 게시된 최신 포크 릴리즈**(그 태그 커밋; 태그 뒤 브랜치 커밋이 도구 경로 `fork/**`·`.github/workflows/fork-release.yml`만 바꿨으면 브랜치 끝). 게시 스크립트가 게시 확인 뒤 `fork/sync-main.sh <태그>`로 `--force-with-lease`(맨 --force 없음, `--no-follow-tags`) 푸시한다. 단독으로도 돌릴 수 있지만 그 태그가 지금 Latest일 때만 움직인다.
+- 안전장치: 지금 main의 포크 커밋(main의 기반 릴리즈 태그 위의 커밋) 중 새 대상에 없는 것은 다음일 때만 통과한다 — 재생성 커밋, 새 스택이나 새 업스트림 기반에 patch-id가 같은 커밋이 있고 그 커밋이 바꾼 모든 경로의 내용이 새 대상과 똑같음, 또는 사람이 `--confirm-ported`/`--confirm-upstream`으로 확인함. 아니면 멈춘다. main에 merge 커밋이 있거나, main의 기반이 더 새 릴리즈거나, 원격 주소(insteadOf까지 펼친 실제 fetch·push 주소)가 vbalien/orca·stablyai/orca가 아니면 멈춘다.
+- 기록: `~/orca-fork-build/main-history.log`에 시도(attempt: 이전·새 SHA, 사라지는 커밋마다 `원본:판정 방식:대응 커밋` 전체 SHA)와 결과(confirmed·unchanged·unknown, 관측 SHA)를 남긴다. 되돌리는 명령은 성공 때 출력된다: `git push --no-follow-tags --force-with-lease=refs/heads/main:<새> origin <이전>:refs/heads/main`.
+- main을 처음 이렇게 바꾸기 전의 main(업스트림 main + PR #1~#4)은 `archive/main-before-release-base`(4384f615d)에 남아 있다.
+- 주인 클론 맞추기(작업 트리가 깨끗하고 로컬 main에 원격에 없는 커밋이 없을 때만): `git -C ~/workspaces/orca fetch origin && git -C ~/workspaces/orca status --short && git -C ~/workspaces/orca log --oneline origin/main..main` 가 둘 다 비어 있으면 `git -C ~/workspaces/orca checkout main && git -C ~/workspaces/orca reset --hard origin/main`. 로컬 전용 커밋이 있으면 먼저 브랜치로 남긴다(`git -C ~/workspaces/orca branch keep-main-<날짜> main`).
 
 ## 한계
 
 - 서명이 없다: 맥은 ad-hoc 서명·공증 없음, 윈도우는 서명 없음. 첫 실행 안내는 릴리즈 노트에 있다.
-- 포크 Actions에는 업스트림 워크플로도 등록돼 있다. 예약 실행·PR 트리거가 있는 것은 Actions 설정에서 끄는 것을 권한다(fork-release.yml만 필요).
+- 포크 Actions: 업스트림 워크플로 66개는 설정으로 껐다(파일은 그대로, 업스트림과 충돌을 늘리지 않게). 켜 둔 것은 Fork Release와 Qualified server template(workflow_call 전용 — Fork Release가 부름)뿐이다. Headless Node server(node-server-tests.yml)는 템플릿이 부르지만 예약·PR 트리거가 있어 껐다 — 끈 워크플로도 다른 워크플로가 부르면 돈다는 GitHub 동작(커뮤니티 확인, 공식 문서 없음)에 기댄다. 릴리즈 실행에서 템플릿 단계가 "workflow is disabled" 등으로 실패하면 그것 하나만 다시 켠다: `gh workflow enable node-server-tests.yml --repo github.com/vbalien/orca`.

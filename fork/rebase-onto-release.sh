@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 사용법: fork/rebase-onto-release.sh <새태그> [--from <브랜치>] [--release <N>]
   <새태그>         업스트림 릴리즈 태그 (예: v1.4.276)
-  --from <브랜치>  옮길 패치 묶음 (기본: origin의 fork/v* 중 가장 높은 버전)
+  --from <브랜치>  옮길 패치 묶음 (기본: origin/main — 게시된 최신 포크 릴리즈와 그 뒤 병합된 패치)
   --release <N>    끝나면 origin에 올리고 태그 fork-<새태그>-<N>으로 릴리즈 초안을 만든다
 fork/<새태그>가 이미 있으면 그것을 이어서 검사·빌드·포장한다
 (충돌을 풀고 git rebase --continue를 끝낸 뒤, 또는 새 패치를 더한 뒤 같은 명령을 다시 실행).
@@ -16,12 +16,6 @@ fork/<새태그>가 이미 있으면 그것을 이어서 검사·빌드·포장�
 EOF
 }
 
-REGEN_SUBJECT='fork: regenerate generated files'
-GENERATED=(
-  src/renderer/src/i18n/en-runtime-required.json
-  src/shared/rpc-contract/rpc-params-catalog.generated.ts
-  src/shared/plugins/languages/protected-copy-keys.json
-)
 BUILD_ROOT=$HOME/orca-fork-build
 # 빌드 루트는 실제 폴더여야 한다(링크면 정리 명령 --stop이 거부하므로 만들기 전에 멈춘다).
 [[ ! -L "$BUILD_ROOT" ]] || { echo "$BUILD_ROOT가 심볼릭 링크다. 실제 폴더로 바꾼 뒤 다시." >&2; exit 1; }
@@ -62,14 +56,18 @@ FORK_REPO=vbalien/orca
 
 REPO=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 g() { git -C "$REPO" "$@"; }
+MS_REPO=$REPO
+# shellcheck source=fork/lib-main-sync.sh
+source "$REPO/fork/lib-main-sync.sh"
+REGEN_SUBJECT=$MS_REGEN_SUBJECT
+GENERATED=("${MS_GENERATED[@]}")
 plain_path "$BUILD_ROOT"
 
 # git 2.38+ (rebase --no-update-refs).
 printf '%s\n%s\n' 2.38 "$(git version | awk '{print $3}')" | sort -V -C || die "git 2.38 이상이 필요하다"
 # 원격이 맞는 저장소인지 (무엇을 받아 실행하고 어디로 올리는지). https·ssh 둘 다 받는다.
-is_github_repo() { [[ "$1" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)$2(\.git)?/?$ ]]; }
-is_github_repo "$(g remote get-url upstream)" stablyai/orca || die "upstream이 github.com/stablyai/orca가 아니다: $(g remote get-url upstream)"
-is_github_repo "$(g remote get-url origin)" "$FORK_REPO" || die "origin이 github.com/$FORK_REPO가 아니다: $(g remote get-url origin)"
+# 실제 통신 대상(insteadOf·pushInsteadOf를 펼친 값)의 모든 fetch·push 주소로 본다.
+ms_check_remotes "$FORK_REPO" stablyai/orca || exit 1
 
 # 빌드 환경: 빌드할 때만 확인한다(이미 포장한 커밋의 릴리즈만 이어서 할 때는 필요 없다).
 check_build_env() {
@@ -147,9 +145,11 @@ gnet fetch --quiet --no-tags upstream "refs/tags/$TAG:refs/tags/$TAG" || die "up
 [[ "$(upstream_tag_sha "$TAG")" == "$(g rev-parse "$TAG^{commit}")" ]] || die "로컬 태그 $TAG가 upstream과 다르다"
 gnet fetch --quiet upstream --tags || die "upstream 태그를 가져오지 못했다" # 옛 기반 태그를 찾을 때 쓴다
 gnet fetch --quiet origin || die "origin을 가져오지 못했다"
-# 릴리즈 단계의 push는 이 시점에 본 origin 브랜치 값으로만 덮는다(빌드 중에 누가 올린 커밋은 지키게).
-ORIGIN_BRANCH_SHA=$(g rev-parse -q --verify "refs/remotes/origin/$BRANCH" || true)
-if command -v gh >/dev/null && ! timeout -k 5 60 gh release view "$TAG" -R stablyai/orca --json tagName >/dev/null 2>&1; then
+# 원격 릴리즈 브랜치는 로컬 추적 ref가 아니라 원격에 직접 묻는다(fetch 설정이 좁은 클론에서도). 있으면 명시적으로 가져온다.
+# 이미 올라간 브랜치는 덮어쓰지 않는다: 재정렬·amend 없이 이어서 하고, 릴리즈 push는 fast-forward만.
+ORIGIN_BRANCH_SHA=$(ms_remote_branch "$BRANCH") || die "origin의 $BRANCH를 조회하거나 가져오지 못했다"
+command -v gh >/dev/null || die "gh가 필요하다"
+if ! timeout -k 5 60 gh release view "$TAG" --repo github.com/stablyai/orca --json tagName >/dev/null 2>&1; then
   echo "주의: $TAG의 GitHub Release가 아직 공개되지 않았다(태그만 있음). AUR도 아직 이 버전이 아닐 수 있다."
 fi
 
@@ -204,7 +204,8 @@ rebase_stack() { # <onto> <base>
   check_linear "$2..HEAD"
   # 지우지 않고 drop으로 바꾼다(rebase.missingCommitsCheck 설정과도 맞는다).
   # 새 git은 할 일 목록에 "pick <해시> # <제목>"으로 쓴다("# " 없이 쓰는 git도 받는다).
-  local editor="sed -i 's/^pick \\([0-9a-f]*\\) \\(# \\)\\{0,1\\}${REGEN_SUBJECT}\$/drop \\1 \\2${REGEN_SUBJECT}/'"
+  local editor
+  editor=$(ms_regen_drop_editor)
   local status=0
   # 이미 새 릴리즈에 들어가 비게 된 패치는 버린다(--empty=drop). 할 일 목록 형식은 사용자 설정과 무관하게 고정.
   GIT_SEQUENCE_EDITOR=$editor wt -c rebase.instructionFormat=%s -c rebase.abbreviateCommands=false \
@@ -240,8 +241,7 @@ base_tag_of() {
 }
 
 # origin에 이미 fork/<태그>가 있는데 로컬에 없으면, 그 원격 브랜치를 가져와 이어서 한다(원격에만 있는 패치를 덮지 않게).
-if ! g rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null &&
-  g rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null; then
+if ! g rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null && [[ -n "$ORIGIN_BRANCH_SHA" ]]; then
   echo "알림: origin/$BRANCH가 이미 있어 그것을 로컬 $BRANCH로 가져와 이어서 한다${FROM:+(--from $FROM은 쓰지 않는다)}."
   g branch --quiet --no-track "$BRANCH" "origin/$BRANCH"
 fi
@@ -266,7 +266,7 @@ if g rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null; then
   in_rebase && stop_for_conflict
   [[ -z "$(wt status --porcelain)" ]] || die "$WT에 커밋 안 한 변경이나 추적 안 하는 파일이 있다: $(wt status --porcelain | head -n 5)"
   # origin에만 있는 커밋(재생성 커밋 제외)이 있으면 멈춘다. 이 스크립트가 다시 쓴 것은 내용이 같아 걸리지 않는다.
-  if g rev-parse -q --verify "refs/remotes/origin/$BRANCH" >/dev/null; then
+  if [[ -n "$ORIGIN_BRANCH_SHA" ]]; then
     missing=''
     for sha in $(g cherry "$BRANCH" "origin/$BRANCH" | awk '$1=="+"{print $2}'); do
       is_regen "$sha" || missing+=" $sha"
@@ -278,14 +278,21 @@ if g rev-parse -q --verify "refs/heads/$BRANCH" >/dev/null; then
   # 재생성 커밋이 맨 위 하나뿐이면 다시 쓰지 않는다(내용이 같으면 SHA도 그대로).
   check_regen "$TAG..HEAD"
   check_linear "$TAG..HEAD"
-  if [[ "$(regen_count "$TAG..HEAD")" != "$(regen_count "HEAD~1..HEAD")" ]]; then
+  # 원격에 이미 올라간 브랜치는 재정렬하지 않는다(재생성 커밋이 맨 위가 아니어도 그대로 두고 새로 쌓는다).
+  if ms_reorder_allowed "$ORIGIN_BRANCH_SHA" && [[ "$(regen_count "$TAG..HEAD")" != "$(regen_count "HEAD~1..HEAD")" ]]; then
     rebase_stack "$TAG" "$TAG"
   fi
 else
   if [[ -z "$FROM" ]]; then
-    FROM=$(g for-each-ref --format='%(refname:lstrip=2)' 'refs/remotes/origin/fork/v*' |
-      grep -E '^origin/fork/v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
-    [[ -n "$FROM" ]] || die "origin에 fork/v* 브랜치가 없다. --from으로 정하라."
+    # 기본 출발점 = origin/main(게시된 최신 포크 릴리즈 + 그 뒤 병합된 패치). 최신 게시 릴리즈를 포함해야 한다.
+    gnet fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main" || die "origin의 main을 가져오지 못했다"
+    latest=$(timeout -k 5 60 gh api --hostname github.com "repos/$FORK_REPO/releases/latest" --jq .tag_name) ||
+      die "$FORK_REPO의 Latest 릴리즈를 읽지 못했다(--from으로 출발점을 정할 수 있다)"
+    [[ "$latest" =~ ^fork-v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]] || die "Latest 릴리즈 태그가 포크 형식이 아니다: '$latest'"
+    gnet fetch --quiet --no-tags origin "+refs/tags/$latest:refs/tags/$latest" || die "origin에서 태그 $latest를 가져오지 못했다"
+    ms_start_ok "$(g rev-parse "$latest^{commit}")" refs/remotes/origin/main ||
+      die "origin/main이 게시된 최신 릴리즈 $latest를 포함하지 않는다: fork/sync-main.sh $latest로 main을 맞추거나 --from으로 출발점을 정한다"
+    FROM=origin/main
   fi
   g rev-parse -q --verify "$FROM^{commit}" >/dev/null || die "출발 브랜치 $FROM이 없다"
   OLD_TAG=$(base_tag_of "$FROM")
@@ -333,7 +340,8 @@ changed=$(git status --porcelain --untracked-files=no | cut -c4-)
 if [[ -n "$changed" ]]; then
   printf '%s\n' "$changed" | only_generated || die "생성 파일 밖에서 변경이 생겼다: $changed"
   git add -- "${GENERATED[@]}"
-  if [[ "$(git log -1 --format=%s HEAD)" == "$REGEN_SUBJECT" ]]; then
+  # 맨 위 재생성 커밋이 아직 원격에 없을 때만 고쳐 쓴다(올라간 커밋은 다시 쓰지 않고 새로 쌓는다).
+  if ms_may_amend "$ORIGIN_BRANCH_SHA" "$(git rev-parse HEAD)" "$BRANCH"; then
     git commit --quiet --amend --no-edit
   else
     git commit --quiet -m "$REGEN_SUBJECT" -m "Regenerated by fork/rebase-onto-release.sh on $TAG."
@@ -351,6 +359,7 @@ timeout -k 30 900 pnpm check:changed --base="$TAG"
 for f in fork/*.sh fork/aur/*.sh; do bash -n "$f" || die "$f 문법 오류"; done
 timeout -k 5 120 bash fork/aur/test-orca-service-checks.sh
 timeout -k 5 300 bash fork/test-verify-linux.sh
+timeout -k 5 600 bash fork/test-main-sync.sh
 
 # ---- 빌드 ----
 say "빌드 (build:unpack)"
@@ -475,11 +484,9 @@ EOF
 # ---- 릴리즈: origin에 올리고 태그로 워크플로를 돌려 초안까지 ----
 say "릴리즈 $RELEASE_TAG"
 command -v gh >/dev/null || die "gh가 필요하다"
-[[ "$(timeout -k 5 60 gh api "repos/$FORK_REPO/actions/permissions" --jq .enabled)" == true ]] ||
+[[ "$(timeout -k 5 60 gh api --hostname github.com "repos/$FORK_REPO/actions/permissions" --jq .enabled)" == true ]] ||
   die "$FORK_REPO의 GitHub Actions가 꺼져 있다(설정 → Actions에서 켠 뒤 다시)"
-while IFS= read -r url; do
-  is_github_repo "$url" "$FORK_REPO" || die "origin의 push 주소가 $FORK_REPO가 아니다: $url"
-done < <(g remote get-url --push --all origin)
+ms_check_remotes "$FORK_REPO" stablyai/orca || exit 1
 HEAD_SHA=$FULL_SHA
 # 1) 브랜치: origin에 없거나 조상이면 그냥, 이 스크립트가 다시 썼으면(같은 내용) 시작 때 본 origin 값으로만 덮는다.
 # 태그는 로컬·원격 모두 이 커밋이어야 한다(먼저 확인해 아무것도 올리기 전에 멈춘다).
@@ -490,12 +497,18 @@ remote_tag=$(gnet ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_
 [[ -z "$remote_tag" || "$remote_tag" == "$HEAD_SHA" ]] ||
   die "origin의 태그 $RELEASE_TAG가 다른 커밋($remote_tag)이다. 다음 번호로 다시."
 # 1) 브랜치: 검증한 커밋을 명시해 올린다(호출한 저장소의 HEAD가 아니라).
-if [[ -z "$ORIGIN_BRANCH_SHA" ]]; then
-  # 시작 때 없던 브랜치: 그사이 누가 만들었으면 거부된다.
-  gnet push --force-with-lease="refs/heads/$BRANCH:" origin "$HEAD_SHA:refs/heads/$BRANCH"
-elif [[ "$ORIGIN_BRANCH_SHA" != "$HEAD_SHA" ]]; then
-  gnet push --force-with-lease="refs/heads/$BRANCH:$ORIGIN_BRANCH_SHA" origin "$HEAD_SHA:refs/heads/$BRANCH" ||
-    die "origin/$BRANCH가 시작한 뒤 바뀌었다. 맞춘 뒤 다시."
+# 시작 때 없던 브랜치는 "없음" lease(그사이 누가 만들었으면 거부), 있던 브랜치는 fast-forward만(덮어쓰지 않는다).
+push_rc=0
+ms_push_release_branch "$ORIGIN_BRANCH_SHA" "$HEAD_SHA" "$BRANCH" || push_rc=$?
+if ((push_rc == 3)); then
+  die "origin/$BRANCH(${ORIGIN_BRANCH_SHA:0:10})가 이 커밋의 조상이 아니다 — 원격 릴리즈 브랜치는 덮어쓰지 않는다.
+  로컬에만 있는 변경을 원격 끝 위에 다시 얹은 뒤 같은 명령을 다시:
+    git -C $WT branch keep-local-\$(date +%Y%m%d%H%M) HEAD
+    git -C $WT reset --hard origin/$BRANCH
+    git -C $WT cherry-pick <로컬에만 있는 커밋들(재생성 커밋 빼고)>
+  또는 다음 업스트림 버전으로 새로 낸다. (브랜치 이름은 fork/<태그>로 고정이라 번호만 바꾸는 것은 해결이 아니다.)"
+elif ((push_rc != 0)); then
+  die "origin/$BRANCH push가 거부·실패했다(시작한 뒤 원격이 바뀌었을 수 있다). 맞춘 뒤 다시."
 fi
 # 2) 태그: 없으면 만들어 올린다.
 if [[ -z "$remote_tag" ]]; then
@@ -508,23 +521,23 @@ run_id=''
 deadline=$((SECONDS + 300))
 # 남은 시간을 한 번 읽어 양수일 때만 쓴다(GNU timeout 0은 '제한 없음').
 while left=$((deadline - SECONDS)) && ((left > 0)); do
-  run_id=$(timeout -k 5 "$((left < 30 ? left : 30))" gh run list -R "$FORK_REPO" --workflow fork-release.yml \
+  run_id=$(timeout -k 5 "$((left < 30 ? left : 30))" gh run list --repo "github.com/$FORK_REPO" --workflow fork-release.yml \
     --branch "$RELEASE_TAG" --json databaseId,headSha \
     --jq ".[] | select(.headSha == \"$HEAD_SHA\") | .databaseId" 2>/dev/null | head -n 1 || true)
   [[ -n "$run_id" ]] && break
   left=$((deadline - SECONDS)) && ((left > 0)) && sleep "$((left < 10 ? left : 10))"
 done
-[[ -n "$run_id" ]] || die "5분 안에 $RELEASE_TAG의 워크플로 실행이 보이지 않는다. 확인: gh run list -R $FORK_REPO --workflow fork-release.yml"
+[[ -n "$run_id" ]] || die "5분 안에 $RELEASE_TAG의 워크플로 실행이 보이지 않는다. 확인: gh run list --repo github.com/$FORK_REPO --workflow fork-release.yml"
 echo "실행: https://github.com/$FORK_REPO/actions/runs/$run_id"
 watch_status=0
-timeout -k 30 25200 gh run watch "$run_id" -R "$FORK_REPO" --exit-status --interval 60 || watch_status=$?
+timeout -k 30 25200 gh run watch "$run_id" --repo "github.com/$FORK_REPO" --exit-status --interval 60 || watch_status=$?
 if ((watch_status == 124 || watch_status == 137)); then
   echo "7시간 안에 끝나지 않았다(실행은 계속된다). 같은 명령을 다시 실행하면 이어서 기다린다."
   exit 3
 fi
 if ((watch_status != 0)); then
   # 감시만 끊겼는지, 실행이 실제로 실패했는지 본다.
-  conclusion=$(timeout -k 5 60 gh run view "$run_id" -R "$FORK_REPO" --json status,conclusion --jq '.status + "/" + .conclusion' 2>/dev/null || true)
+  conclusion=$(timeout -k 5 60 gh run view "$run_id" --repo "github.com/$FORK_REPO" --json status,conclusion --jq '.status + "/" + .conclusion' 2>/dev/null || true)
   case "$conclusion" in
     completed/success) watch_status=0 ;;
     completed/*) ;;
@@ -532,10 +545,10 @@ if ((watch_status != 0)); then
   esac
 fi
 ((watch_status == 0)) || die "릴리즈 워크플로가 실패했다: https://github.com/$FORK_REPO/actions/runs/$run_id
-  일시적(러너·네트워크, 템플릿 조립 잡의 25분 대기 초과 등)이면: gh run rerun $run_id -R $FORK_REPO --failed  그 뒤 같은 명령을 다시 실행해 기다린다(하루 안에).
+  일시적(러너·네트워크, 템플릿 조립 잡의 25분 대기 초과 등)이면: gh run rerun $run_id --repo github.com/$FORK_REPO --failed  그 뒤 같은 명령을 다시 실행해 기다린다(하루 안에).
   코드·설정을 고쳤거나 하루가 지났으면: 고친 커밋(또는 같은 커밋)에 다음 번호로 --release $((RELEASE + 1))"
 say "초안 준비됨"
-release_state=$(timeout -k 5 60 gh release view "$RELEASE_TAG" -R "$FORK_REPO" --json url,isDraft \
+release_state=$(timeout -k 5 60 gh release view "$RELEASE_TAG" --repo "github.com/$FORK_REPO" --json url,isDraft \
   --jq '(if .isDraft then "draft" else "published" end) + " " + .url' 2>/dev/null || true)
 case "$release_state" in
   published\ *) echo "이미 게시됐다: ${release_state#published }"; exit 0 ;;
