@@ -1,5 +1,5 @@
 // A bot's Slack gate API key: sealed by the OS keychain, one private file per bot in this profile's
-// data folder, bound to the bot id. Written from the owner's Orca only; never returned or logged.
+// data folder, bound to the bot id. Written by the owner's Orca, here or paired; never returned or logged.
 import { createHash } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -39,7 +39,9 @@ export function slackGateKeySealing(): 'os-keychain' | 'unavailable' {
 
 export class SlackGateKeyUnsealedError extends Error {
   constructor() {
-    super('Saving a gate key needs the system keychain, which this computer does not offer Orca.')
+    super(
+      'Saving a gate key needs the system keychain on this bot’s computer, which it does not offer Orca.'
+    )
   }
 }
 
