@@ -21,6 +21,7 @@ import {
   type SlackReadPause
 } from './slack-local-gate-context'
 import type { SlackLocalParticipation } from './slack-local-participation'
+import { slackGateLimitsClosed } from '../bots/slack-gate/slack-gate'
 import { localSlackGateEvent, type LocalSlackWakeGate } from './slack-local-wake-gate'
 import { askerRole, SlackLocalAskers } from './slack-local-asker'
 import { SlackLocalThreadChats, type ThreadQueue } from './slack-local-thread-chat'
@@ -49,7 +50,8 @@ export type SlackLocalReads = {
   ) => Promise<{ messages: LocalSlackThreadMessage[]; complete: boolean }>
   /** What came right before a message, for an OpenAI gate in a running chat's thread. */
   recentThread?: SlackLocalRecentThread
-  userName: (userId: string) => Promise<string | undefined>
+  /** With `signal`, gives up when it aborts (a channel message's bounded read). */
+  userName: (userId: string, signal?: AbortSignal) => Promise<string | undefined>
 }
 
 export type SlackLocalInboundDeps = {
@@ -63,6 +65,8 @@ export type SlackLocalInboundDeps = {
   now?: () => number
   /** Which channel-message threads the bot joined; without it no channel message is taken. */
   participation?: SlackLocalParticipation
+  /** Defaults to the process's own (slackGateLimitsClosed). */
+  limitsClosed?: typeof slackGateLimitsClosed
 }
 
 export class SlackLocalInbound {
@@ -219,6 +223,17 @@ export class SlackLocalInbound {
     if (channelMessage && (left() <= 0 || !this.chats.channelTaken(bot, message))) {
       return
     }
+    // Limits already used up: nothing is read or asked for it.
+    const limitsClosed = this.deps.limitsClosed ?? slackGateLimitsClosed
+    if (
+      await limitsClosed(bot, {
+        eventId: message.eventId,
+        case: gateCase,
+        channelId: message.channelId
+      })
+    ) {
+      return
+    }
     const role = askerRole(bot, message)
     if (!role || !this.seenMessages.add(`${message.channelId}:${message.ts}`)) {
       return
@@ -279,12 +294,14 @@ export class SlackLocalInbound {
         reservation?.release()
         return
       }
-      let admitted = false
+      // When the chat took it: a limited rule's wake counts on that day (plan "확정 날짜").
+      let admittedAt: number | undefined
       const admissible = (): boolean => {
-        if (!allowed() || (reservation && !reservation.admit(this.now()))) {
+        const at = this.now()
+        if (!allowed() || (reservation && !reservation.admit(at))) {
           return false
         }
-        admitted = true
+        admittedAt = at
         return true
       }
       await deliverLocalSlack(
@@ -297,7 +314,7 @@ export class SlackLocalInbound {
         asker,
         verdict,
         admissible,
-        () => admitted
+        () => admittedAt
       )
     } catch (error) {
       reservation?.release()

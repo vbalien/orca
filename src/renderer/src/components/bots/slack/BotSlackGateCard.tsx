@@ -32,7 +32,7 @@ import {
 } from '../../../../../shared/bots/slack-gate-rules-text'
 import { channelIdsOf, draftOf, gateOf, knownGate, type SlackGateDraft } from './slack-gate-draft'
 import { BotSlackGateKeyField } from './BotSlackGateKeyField'
-import { BotSlackGateScriptField } from './BotSlackGateScriptField'
+import { BotSlackGateScriptField, LimitsHeld } from './BotSlackGateScriptField'
 import { BotSlackGateChannelField } from './BotSlackGateChannelField'
 import {
   slackGateRulesExtended,
@@ -346,6 +346,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             )}
           </p>
         ) : null}
+        <LimitsHeld heldUntil={keyStatus?.pendingWakes?.heldUntil} />
         {/* Keyed by host, bot and kind: a typed key never carries over to another one's slot. */}
         <BotSlackGateKeyField
           key={`${botRefKey(bot)}:${draft.kind}`}

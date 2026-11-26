@@ -13,9 +13,10 @@ N env PATH=$PATH $E/scenarios-channel.sh
 N env PATH=$PATH $E/scenarios-script.sh
 [ -n "${E2E_OLD_DIST:-}" ] && N env PATH=$PATH E2E_OLD_DIST=$E2E_OLD_DIST $E/scenarios-old.sh
 echo "== leaks"
-echo "   marks (gate key, Slack tokens) in files: $(grep -rl 'E2EGATEKEYMARK93\|E2EBOTMARK91\|E2EAPPMARK92' $R/srv $R/cli $R/logs 2>/dev/null | wc -l)"
-echo "   message text in the server log: $(grep -c 'release notes live\|shared notes for the offsite\|lunch at noon' $R/logs/serve*.log | awk -F: '{s+=$2} END {print s}')"
-echo "   message text in the wake-count / participation files: $(grep -rl 'release notes\|offsite\|lunch' $R/srv/data/bot-slack-gate-wakes $R/srv/data/slack-local-participation 2>/dev/null | wc -l)"
+source $E/lib.sh 2>/dev/null
+say "marks (gate key, Slack tokens) in files" "$(grep -rl 'E2EGATEKEYMARK93\|E2EBOTMARK91\|E2EAPPMARK92' $R/srv $R/cli $R/logs 2>/dev/null | wc -l)" 0
+say "message text in the server log" "$(grep -c 'release notes live\|shared notes for the offsite\|lunch at noon' $R/logs/serve*.log | awk -F: '{s+=$2} END {print s}')" 0
+say "message text in the wake-count / participation files" "$(grep -rl 'release notes\|offsite\|lunch' $R/srv/data/bot-slack-gate-wakes $R/srv/data/slack-local-participation 2>/dev/null | wc -l)" 0
 echo "== [slack-gate] log lines"
 python3 - "$R" <<'PY'
 import re, sys, glob
@@ -23,4 +24,6 @@ for f in sorted(glob.glob(sys.argv[1] + '/logs/serve*.log')):
   for m in re.finditer(r"\[slack-gate\] \{(.*?)\n\}", open(f).read(), re.S):
     b = ' '.join(x.strip() for x in m.group(1).splitlines()); b = re.sub(r"botId: '[^']*',|eventId: '[^']*',", "", b); print('  ', b[:230])
 PY
-$E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder)" 2>/dev/null; true
+$E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder)" 2>/dev/null
+if [ -s $R/failures ]; then echo "== FAILED ($(wc -l < $R/failures))"; cat $R/failures; exit 1; fi
+echo "== all checks passed"

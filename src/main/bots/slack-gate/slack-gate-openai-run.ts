@@ -28,6 +28,25 @@ function ruleReason(config: SlackGateRulesConfig, index: number | undefined): st
   return rule ? (rule.note ? `${rule.question}: ${rule.note}` : rule.question) : undefined
 }
 
+/** A message posted in a channel without addressing the bot: the own app's channel messages, and an
+ *  Orca Cloud `slack.message` automation event. A failed or unsure check never wakes for one. */
+/** How long limited rules stay held after an unreadable counts file: the longest cooldown the gate's
+ *  rules can set (a rules script may set any, so the most allowed). */
+export function slackGateRecoveryCooldown(
+  gate: Extract<BotSlackGateEdit, { kind: 'openai' }>
+): number {
+  return gate.rulesCommand
+    ? SLACK_GATE_LIMIT_MAX_COOLDOWN_MINUTES
+    : slackGateLongestCooldown(gate.openai)
+}
+
+export function isChannelMessage(event: SlackGateEvent): boolean {
+  return (
+    event.case === 'channel_message' ||
+    (event.case === 'trigger' && event.trigger?.event === 'message')
+  )
+}
+
 /** A command gate's input is the event as it always was: newer gate-only fields stay out. */
 export function commandEvent(event: SlackGateEvent): Omit<SlackGateEvent, 'contextIncomplete'> {
   const { contextIncomplete: _gateOnly, ...rest } = event
@@ -64,12 +83,7 @@ export class SlackGateOpenAIRun {
     // Read only when a limit or a rules script needs them.
     let loaded: SlackGateBotCounts | null = null
     const counts = async () =>
-      (loaded ??= await store.load(
-        bot.id,
-        gate.rulesCommand
-          ? SLACK_GATE_LIMIT_MAX_COOLDOWN_MINUTES
-          : slackGateLongestCooldown(gate.openai)
-      ))
+      (loaded ??= await store.load(bot.id, slackGateRecoveryCooldown(gate)))
     let config = gate.openai
     let rulesFrom: 'saved' | 'script' = 'saved'
     if (gate.rulesCommand) {
@@ -114,7 +128,7 @@ export class SlackGateOpenAIRun {
         config,
         bot: { name: bot.name },
         event,
-        key: null,
+        key,
         signal,
         opaque: rulesFrom === 'script'
       })
@@ -130,7 +144,10 @@ export class SlackGateOpenAIRun {
         rulesFrom
       }
     }
-    const verdict = decideSlackGateRules(config, asked.answers, { case: event.case, limitOpen })
+    const verdict = decideSlackGateRules(config, asked.answers, {
+      case: isChannelMessage(event) ? 'channel_message' : event.case,
+      limitOpen
+    })
     const outcome: SlackGateOutcome = {
       kind: 'verdict',
       wake: verdict.wake,
@@ -189,7 +206,7 @@ export class SlackGateOpenAIRun {
       command,
       stdin: rulesScriptStdin(bot, event, this.counts.channelWakes(counts, event.channelId, at)),
       // A rules script never gets a key: Orca calls OpenAI itself.
-      key,
+      key: null,
       timeoutMs: Math.max(1, timeoutAt - at),
       signal,
       stdoutLimit: SLACK_GATE_SCRIPT_MAX_OUTPUT_BYTES

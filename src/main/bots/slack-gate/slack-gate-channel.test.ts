@@ -261,6 +261,72 @@ it('never wakes on a failed check when the rules have a limit, and gives a late 
   answer({ kind: 'answers', answers: { asks: predicate(0.1), banter: predicate(0.95) } })
   expect(await deciding).toMatchObject({ verdict: 'block' })
   vi.useRealTimers()
-  const loaded = await counts.load('b1')
+  const loaded = await counts.load('b1', 0)
   expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, Date.now())).toBe(true)
+})
+
+it('asks OpenAI with the saved key and runs a rules script without one', async () => {
+  const keys: (string | null)[] = []
+  const run = script('{"useSaved":true}')
+  const { decider: d } = decider({
+    askOpenAI: async (input) => {
+      keys.push(input.key)
+      return { kind: 'answers', answers: { asks: predicate(0.9) } }
+    },
+    runCommand: run.runCommand
+  })
+  expect((await d.decide(bot(gate()), channel())).verdict).toBe('wake')
+  expect((await d.decide(bot(gate({ rulesCommand: 'rules' })), channel())).verdict).toBe('wake')
+  expect(keys).toEqual(['sk-test', 'sk-test'])
+  expect(run.runs.map((entry) => entry.key)).toEqual([null])
+})
+
+it('treats an Orca Cloud slack.message event like a channel message: a failed or unsure check never wakes', async () => {
+  const message = channel({
+    case: 'trigger',
+    trigger: { automationId: 'a1', triggerId: 'r1', event: 'message' }
+  })
+  const triggers = gate({ appliesTo: ['trigger'], channelMessages: undefined })
+  const failing = decider({
+    askOpenAI: async () => ({ kind: 'error', error: 'OpenAI answered 503' })
+  })
+  expect(await failing.decider.decide(bot(triggers), message)).toMatchObject({
+    verdict: 'block',
+    reason: 'error'
+  })
+  const unsure = decider({
+    askOpenAI: async () => ({ kind: 'answers', answers: { asks: predicate(0.5) } })
+  })
+  expect((await unsure.decider.decide(bot(triggers), message)).verdict).toBe('block')
+  // Another automation event still follows onError.
+  const reaction = channel({
+    case: 'trigger',
+    trigger: { automationId: 'a1', triggerId: 'r1', event: 'reaction_added' }
+  })
+  expect((await failing.decider.decide(bot(triggers), reaction)).verdict).toBe('wake')
+})
+
+it('tells before any read when every way to wake is used up, never rolling chance', async () => {
+  const random = vi.fn(() => 0)
+  const { decider: d } = decider({ random })
+  const onlyBanter = gate({
+    openai: { ...limited, questions: [limited.questions[1]!], rules: [limited.rules[1]!] }
+  })
+  expect(await d.limitsClosed(bot(onlyBanter), channel())).toBe(false)
+  const loaded = await counts.load('b1', 0)
+  const reservation = counts.reserve(loaded, {
+    channelId: 'C1',
+    question: 'banter',
+    at: Date.now()
+  })!
+  await reservation.persisted
+  reservation.admit(Date.now())
+  reservation.commit(Date.now())
+  expect(await d.limitsClosed(bot(onlyBanter), channel())).toBe(true)
+  // Another rule without a limit can still wake, and a rules script's rules aren't known yet.
+  expect(await d.limitsClosed(bot(gate({ openai: limited })), channel())).toBe(false)
+  expect(await d.limitsClosed(bot(gate({ openai: limited, rulesCommand: 'r' })), channel())).toBe(
+    false
+  )
+  expect(random).not.toHaveBeenCalled()
 })

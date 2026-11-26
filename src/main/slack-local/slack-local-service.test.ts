@@ -12,6 +12,13 @@ import { refuseLocalSlackMemberAdds } from './slack-local-members'
 import { SlackLocalService, type SlackLocalServiceDeps } from './slack-local-service'
 import { SlackLocalTokenStore } from './slack-local-token-store'
 
+import type * as SlackLocalWatchModule from './slack-local-watch'
+// This harness keeps no chat links; which chat may post is slack-local-canonical.test's.
+vi.mock('./slack-local-watch', async (original) => ({
+  ...(await original<typeof SlackLocalWatchModule>()),
+  canonicalLocalChat: () => true
+}))
+
 const dirs: string[] = []
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })))
 

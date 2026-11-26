@@ -3,8 +3,7 @@
 import React from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { getIntlLocale } from '@/i18n/i18n'
-import { useTranslate } from '@/i18n/use-translate'
+import { useIntlLocale, useTranslate } from '@/i18n/use-translate'
 import type { SlackGateKeyStatus } from '../../../../../shared/rpc-contract/bots-slack-gate-params'
 
 export function BotSlackGateScriptField(props: {
@@ -18,8 +17,9 @@ export function BotSlackGateScriptField(props: {
   lastRun: SlackGateKeyStatus['scriptRun']
 }): React.JSX.Element {
   const t = useTranslate()
+  const locale = useIntlLocale()
   const { id, lastRun } = props
-  const at = lastRun ? new Date(lastRun.at).toLocaleString(getIntlLocale()) : ''
+  const at = lastRun ? new Date(lastRun.at).toLocaleString(locale) : ''
   return (
     <>
       <Label htmlFor={`${id}-rules-command`} className="mt-2">
@@ -64,5 +64,30 @@ export function BotSlackGateScriptField(props: {
         </p>
       ) : null}
     </>
+  )
+}
+
+/** Limited rules held after the wake counts file could not be read (they wake nothing until then). */
+export function LimitsHeld(props: {
+  heldUntil: number | 'replaced' | undefined
+}): React.JSX.Element | null {
+  const t = useTranslate()
+  const locale = useIntlLocale()
+  if (props.heldUntil === undefined) {
+    return null
+  }
+  return (
+    <p className="leading-5 text-muted-foreground">
+      {props.heldUntil === 'replaced'
+        ? t(
+            'bots.slack.gate.limitsHeldReplacing',
+            'The wake counts file could not be read: limited rules wake nothing until it is replaced.'
+          )
+        : t(
+            'bots.slack.gate.limitsHeld',
+            'The wake counts file could not be read: limited rules wake nothing until {{at}}.',
+            { at: new Date(props.heldUntil).toLocaleString(locale) }
+          )}
+    </p>
   )
 }

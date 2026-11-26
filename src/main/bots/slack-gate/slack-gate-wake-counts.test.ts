@@ -39,7 +39,7 @@ afterEach(() => useBotStateRoot(null))
 
 it('counts only a delivered wake, and holds the count while the delivery is on its way', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const first = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   expect(await first.persisted).toBe(true)
   // Reserved: the next message sees the limit used, even before the first is delivered.
@@ -62,7 +62,7 @@ it('counts only a delivered wake, and holds the count while the delivery is on i
 
 it('gives back a reservation that waited too long, and then refuses its late admission', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const late = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   await late.persisted
   advance(RESERVATION_WAIT_MS + 1)
@@ -80,7 +80,7 @@ it('gives back a reservation that waited too long, and then refuses its late adm
 
 it('cools down from the last delivered wake, and while one is still on its way', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const cooldown = { cooldownMinutes: 30 }
   const wake = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   await wake.persisted
@@ -94,7 +94,7 @@ it('cools down from the last delivered wake, and while one is still on its way',
 it('counts a wake reserved before midnight and delivered after it on the new day', async () => {
   now = new Date(2026, 10, 26, 23, 59, 59).getTime()
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const wake = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   await wake.persisted
   wake.admit(now)
@@ -105,7 +105,7 @@ it('counts a wake reserved before midnight and delivered after it on the new day
 
 it('keeps a day’s count when the clock goes back a day, and adds the wakes made meanwhile to it', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const twice = { perDay: 2 }
   const first = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   await first.persisted
@@ -122,7 +122,7 @@ it('keeps a day’s count when the clock goes back a day, and adds the wakes mad
 
 it('does not let a run that woke yesterday use today’s count when it is settled late', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const yesterday = now - 24 * 60 * 60_000
   const run = store.reserve(bot, {
     channelId: 'C1',
@@ -143,7 +143,7 @@ it('does not let a run that woke yesterday use today’s count when it is settle
 
 it('counts at the next start a reservation left unsettled, and reconciles a trigger’s by its run', async () => {
   const first = counts()
-  const bot = await first.load('b1')
+  const bot = await first.load('b1', 0)
   const pending = first.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
   await pending.persisted
   const trigger = first.reserve(bot, {
@@ -156,7 +156,7 @@ it('counts at the next start a reservation left unsettled, and reconciles a trig
   await trigger.persisted
   // Restart: the plain one may have woken the bot, so it counts; the trigger's waits for its run.
   const second = counts()
-  const again = await second.load('b1')
+  const again = await second.load('b1', 0)
   expect(second.open(again, 'C1', 'banter', daily, now)).toBe(false)
   expect(second.unsettledRuns(again)).toEqual([{ id: trigger.id, automationId: 'a1', runId: 'r1' }])
   // Its run was skipped: it never woke the bot.
@@ -166,7 +166,7 @@ it('counts at the next start a reservation left unsettled, and reconciles a trig
 
 it('leaves a trigger reservation out of reconciling while its run is being created', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const trigger = store.reserve(bot, {
     channelId: 'C1',
     question: 'asks',
@@ -205,7 +205,7 @@ it('blocks limited rules after an unreadable file until neither the day nor a co
 
 it('reserves no more than its cap, and never writes message text or question names', async () => {
   const store = counts()
-  const bot = await store.load('b1')
+  const bot = await store.load('b1', 0)
   const held = Array.from({ length: 200 }, (_, i) =>
     store.reserve(bot, { channelId: `C${i}`, question: 'secret_question_name', at: now })
   )

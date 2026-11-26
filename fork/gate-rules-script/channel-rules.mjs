@@ -53,7 +53,12 @@ const wakeKey = (questionName) =>
   createHash('sha256').update(questionName).digest('hex').slice(0, 16)
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const NAMED = new RegExp(`(^|[^\\p{L}\\p{N}])(${BOT_NAMES.map(escape).join('|')})`, 'iu')
+// A name on its own: not inside a longer word, and not followed by a Latin letter, digit, _ or - (so
+// "mybot2" or "mybots" is someone else). Korean particles may follow it ("봇아", "봇님").
+const NAMED = new RegExp(
+  `(^|[^\\p{L}\\p{N}])(${BOT_NAMES.map(escape).join('|')})(?![A-Za-z0-9_-])`,
+  'iu'
+)
 
 function decide(event) {
   // Mentions, DMs and replies in the bot's own threads: the editor's saved rules.

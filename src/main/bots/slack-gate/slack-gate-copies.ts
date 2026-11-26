@@ -26,8 +26,28 @@ function stable(value: unknown): string {
 
 const digest = (value: unknown) => createHash('sha256').update(stable(value)).digest('hex')
 
+// One file and one line of work per bot: a later save's copy never lands under an earlier one's, and
+// a removed bot's copy is not written again by work already under way.
+const files = new Map<string, BotStateFile>()
+const lines = new Map<string, Promise<unknown>>()
+const fileOf = (botId: string) => {
+  let file = files.get(botId)
+  if (!file) {
+    file = new BotStateFile(FOLDER, botId)
+    files.set(botId, file)
+  }
+  return file
+}
+function inLine<T>(botId: string, work: () => Promise<T>): Promise<T> {
+  const run = (lines.get(botId) ?? Promise.resolve()).then(work)
+  const tail = run.catch(() => undefined)
+  lines.set(botId, tail)
+  void tail.then(() => lines.get(botId) === tail && lines.delete(botId))
+  return run
+}
+
 async function readCopy(botId: string): Promise<{ gate: BotSlackGate; oldView: string } | null> {
-  const read = await new BotStateFile(FOLDER, botId).read()
+  const read = await fileOf(botId).read()
   const parsed = read.kind === 'ok' ? CopyFile.safeParse(read.value) : null
   const gate = parsed?.success ? BotSlackGateSchema.safeParse(parsed.data.gate) : null
   return parsed?.success && gate?.success ? { gate: gate.data, oldView: parsed.data.oldView } : null
@@ -35,21 +55,23 @@ async function readCopy(botId: string): Promise<{ gate: BotSlackGate; oldView: s
 
 /** After a save: keep a copy of a gate older builds can't hold whole; drop it otherwise, unless the
  *  saved gate is what an older Orca leaves of the copied one (an older client saved it unchanged). */
-export async function keepSlackGateCopy(
+export function keepSlackGateCopy(
   botId: string,
   saved: BotSlackGate | null,
   options: { explicitRemoval?: boolean } = {}
 ): Promise<void> {
-  const file = new BotStateFile(FOLDER, botId)
-  if (saved && slackGateUsesNewerFields(saved)) {
-    await file.write(() => ({ v: 1, gate: saved, oldView: digest(oldSchemaView(saved)) }))
-    return
-  }
-  const copy = options.explicitRemoval ? null : await readCopy(botId)
-  if (copy && copy.oldView === digest(saved ?? null)) {
-    return
-  }
-  await file.remove()
+  return inLine(botId, async () => {
+    const file = fileOf(botId)
+    if (saved && slackGateUsesNewerFields(saved)) {
+      await file.write(() => ({ v: 1, gate: saved, oldView: digest(oldSchemaView(saved)) }))
+      return
+    }
+    const copy = options.explicitRemoval ? null : await readCopy(botId)
+    if (copy && copy.oldView === digest(saved ?? null)) {
+      return
+    }
+    await file.clear()
+  })
 }
 
 /** The copied gate when the stored one is still what an older Orca left of it; else null. */
@@ -61,6 +83,9 @@ export async function restorableSlackGate(
   return copy && copy.oldView === digest(stored ?? null) ? copy.gate : null
 }
 
-export async function forgetSlackGateCopy(botId: string): Promise<void> {
-  await new BotStateFile(FOLDER, botId).remove()
+export function forgetSlackGateCopy(botId: string): Promise<void> {
+  return inLine(botId, async () => {
+    await fileOf(botId).remove()
+    files.delete(botId)
+  })
 }

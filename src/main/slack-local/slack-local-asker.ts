@@ -64,7 +64,13 @@ export class SlackLocalAskers {
     linked: boolean,
     channelBudget: (() => number) | null
   ): Promise<{ asker: ConnectorAsker; historyUnknown: boolean; truncated: boolean }> {
-    const name = await this.deps.reads.userName(message.userId).catch(() => undefined)
+    // A channel message reads names in its own bounded lane too (a known name costs nothing).
+    const name = channelBudget
+      ? ((await this.deps.channelReads?.bounded(
+          (signal) => this.deps.reads.userName(message.userId, signal),
+          channelBudget()
+        )) ?? undefined)
+      : await this.deps.reads.userName(message.userId).catch(() => undefined)
     const cap = textCap()
     const words = cap(message.text)
     // Only a mention can be bare: a channel message without words was never taken.

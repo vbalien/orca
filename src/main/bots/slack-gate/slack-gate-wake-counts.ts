@@ -65,7 +65,9 @@ export class SlackGateWakeCounts {
   }
 
   /** The bot's counts, read once. `longestCooldownMinutes`: how long an unreadable file blocks. */
-  load(botId: string, longestCooldownMinutes = 0): Promise<BotCounts> {
+  /** The bot's counts, read once. `longestCooldownMinutes` (slackGateRecoveryCooldown) sets how long
+   *  an unreadable file holds limited rules; every caller passes its gate's. */
+  load(botId: string, longestCooldownMinutes: number): Promise<BotCounts> {
     let loading = this.bots.get(botId)
     if (!loading) {
       loading = this.read(botId, longestCooldownMinutes)
@@ -291,8 +293,11 @@ export class SlackGateWakeCounts {
     await (bot?.file ?? new BotStateFile(FOLDER, botId)).remove()
   }
 
-  /** For status: how many wakes wait to be counted, and the oldest one's age. */
-  async pendingStatus(botId: string): Promise<{ pending: number; oldestMs?: number }> {
+  /** For status: how many wakes wait to be counted, the oldest one's age, and whether limited rules
+   *  are held after an unreadable file (until `blockedUntil`, or until it is replaced). */
+  async pendingStatus(
+    botId: string
+  ): Promise<{ pending: number; oldestMs?: number; heldUntil?: number | 'replaced' }> {
     const loading = this.bots.get(botId)
     if (!loading) {
       return { pending: 0 }
@@ -302,6 +307,15 @@ export class SlackGateWakeCounts {
     const ages = [...bot.pending.values()]
       .filter((e) => e.phase !== 'settled')
       .map((e) => now - e.at)
-    return { pending: ages.length, ...(ages.length > 0 ? { oldestMs: Math.max(...ages) } : {}) }
+    const heldUntil = bot.unsafe
+      ? ('replaced' as const)
+      : bot.blockedUntil !== undefined && bot.blockedUntil > now
+        ? bot.blockedUntil
+        : undefined
+    return {
+      pending: ages.length,
+      ...(ages.length > 0 ? { oldestMs: Math.max(...ages) } : {}),
+      ...(heldUntil !== undefined ? { heldUntil } : {})
+    }
   }
 }

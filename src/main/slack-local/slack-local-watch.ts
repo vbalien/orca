@@ -80,17 +80,19 @@ export class SlackLocalWatch {
  *  (`:c`) only while it is linked and no ordinary chat of the same bot has the thread. */
 export function canonicalLocalChat(
   store: ExternalConversationLinkStore,
-  externalId: string
+  externalId: string,
+  botId?: string
 ): boolean {
   const place = parseLocalSlackConversation(externalId)
-  if (!place) {
+  const own = place ? findLink(store, { source: 'slack-local', externalId }) : null
+  // Unlinked, or linked to another bot since: nothing of this chat goes to Slack.
+  if (!place || !own || (botId !== undefined && own.link.bot?.botId !== botId)) {
     return false
   }
   if (!place.channel) {
     return true
   }
-  const own = findLink(store, { source: 'slack-local', externalId })
   const { channel: _channel, ...ordinary } = place
   const normal = findLink(store, localSlackConversation(ordinary))
-  return own !== null && !(normal && normal.link.bot?.botId === own.link.bot?.botId)
+  return !(normal && normal.link.bot?.botId === own.link.bot?.botId)
 }

@@ -33,7 +33,9 @@ export type SlackGateKeyStatus = {
   /** A copy of settings an older Orca dropped can be put back (bots.slackGate.restore). */
   restorable?: boolean
   /** Wakes of limited rules still waiting to be counted, and the oldest one's age. */
-  pendingWakes?: { pending: number; oldestMs?: number }
+  /** heldUntil: limited rules are held after an unreadable counts file, until then (or until the
+   *  file is replaced). */
+  pendingWakes?: { pending: number; oldestMs?: number; heldUntil?: number | 'replaced' }
 }
 
 export const SLACK_GATE_FEATURES = ['channelMessages', 'rulesCommand', 'ruleLimits'] as const

@@ -10,7 +10,13 @@ import { slackGateRulesExtended } from '../../../shared/bots/slack-gate-rules-co
 import { readSlackGateKey } from './slack-gate-key'
 import { runSlackGateCommand, type SlackGateCommandRun } from './slack-gate-command'
 import { askSlackGateOpenAI } from './slack-gate-openai'
-import { commandEvent, SlackGateOpenAIRun } from './slack-gate-openai-run'
+import {
+  commandEvent,
+  isChannelMessage,
+  slackGateRecoveryCooldown,
+  SlackGateOpenAIRun
+} from './slack-gate-openai-run'
+import { slackGateRulesAllLimited } from './slack-gate-rules'
 import { SlackGateSlots, type SlackGateWork } from './slack-gate-slots'
 import type {
   SlackGateBot,
@@ -41,7 +47,7 @@ export const slackGateWakeCounts = new SlackGateWakeCounts({ now: Date.now })
  *  without an answer (a rules script may return limited rules; saved ones may have them). */
 function failsClosed(gate: BotSlackGateEdit, event: SlackGateEvent): boolean {
   return (
-    event.case === 'channel_message' ||
+    isChannelMessage(event) ||
     (gate.kind === 'openai' &&
       (gate.rulesCommand !== undefined || slackGateRulesExtended(gate.openai).limits))
   )
@@ -58,6 +64,47 @@ export class SlackGateDecider {
       deps.counts ?? slackGateWakeCounts,
       this.scriptRuns
     )
+  }
+
+  /** Before reading anything for an event: whether the gate's saved rules can't wake now, every wake
+   *  rule being limited and used up (per day, cooldown; chance is rolled only when deciding). Never
+   *  for a rules script, whose rules aren't known yet. Logged like a decision when it holds. */
+  async limitsClosed(
+    bot: SlackGateBot,
+    event: Pick<SlackGateEvent, 'eventId' | 'case' | 'channelId'>
+  ): Promise<boolean> {
+    const stored = bot.slackGate
+    if (!stored || !slackGateApplies(bot, event)) {
+      return false
+    }
+    const gate = effectiveSlackGate(stored)
+    if (
+      gate.kind !== 'openai' ||
+      gate.rulesCommand ||
+      !slackGateRulesExtended(gate.openai).limits
+    ) {
+      return false
+    }
+    const counts = this.deps.counts ?? slackGateWakeCounts
+    const loaded = await counts.load(bot.id, slackGateRecoveryCooldown(gate))
+    const at = this.deps.now()
+    const closed = slackGateRulesAllLimited(
+      gate.openai,
+      (_index, rule) =>
+        !rule.limit || counts.open(loaded, event.channelId, rule.question, rule.limit, at)
+    )
+    if (closed) {
+      console.info('[slack-gate]', {
+        botId: bot.id,
+        eventId: event.eventId,
+        case: event.case,
+        verdict: 'block',
+        reason: 'rate_limited',
+        durationMs: 0,
+        precheck: true
+      })
+    }
+    return closed
   }
 
   /** What the bot's rules script last did, since this process started. */
@@ -265,4 +312,12 @@ export function decideSlackWake(
 /** What the bot's rules script last did (settings page). */
 export function slackGateScriptRun(botId: string): SlackGateScriptRun | undefined {
   return shared.scriptRun(botId)
+}
+
+/** Whether `bot`'s saved limits already rule out waking for this event (see SlackGateDecider). */
+export function slackGateLimitsClosed(
+  bot: SlackGateBot,
+  event: Pick<SlackGateEvent, 'eventId' | 'case' | 'channelId'>
+): Promise<boolean> {
+  return shared.limitsClosed(bot, event).catch(() => false)
 }

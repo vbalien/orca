@@ -92,6 +92,19 @@ export class BotStateFile {
     return run
   }
 
+  /** Removes the file in order with its writes; later writes still go. */
+  clear(): Promise<void> {
+    const run = this.tail.then(async () => {
+      try {
+        await rm(this.path, { force: true })
+      } catch {
+        // No data folder (a test, or a host without one) or nothing to remove.
+      }
+    })
+    this.tail = run.catch(() => undefined)
+    return run
+  }
+
   /** No more writes; waits for the one under way, then removes the file. */
   async remove(): Promise<void> {
     this.closed = true

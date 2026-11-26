@@ -8,12 +8,17 @@ turns() { [ -f $R/fake/anthropic.jsonl ] && wc -l < $R/fake/anthropic.jsonl || e
 lastpost() { grep '"api":"chat.postMessage"' $R/fake/calls.jsonl | tail -1 | python3 -c 'import json,sys;p=json.loads(sys.stdin.read() or "{}").get("params",{});print("thread", p.get("thread_ts","-"))'; }
 event() { curl -s -X POST $CTL/event -d "$1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["ts"])'; }
 # step <name> <wait s> <event json>: sends it, waits, prints the counts; the event's ts goes to $R/last-ts.
+# step <name> <wait s> <event json> <expected "decisions/posts">: sends it, waits, prints the counts and
+# records a failure when they differ. The event's ts goes to $R/last-ts.
 step() {
   local p0=$(posts) a0=$(asks) t0=$(turns)
   event "$3" > $R/last-ts; sleep "$2"
-  local dp=$(( $(posts) - p0 ))
-  echo "$1 (ts $(cat $R/last-ts)): decisions +$(( $(asks) - a0 )), agent turns +$(( $(turns) - t0 )), slack posts +$dp$( [ $dp -gt 0 ] && echo " → $(lastpost)")"
+  local dp=$(( $(posts) - p0 )) da=$(( $(asks) - a0 ))
+  echo "$1 (ts $(cat $R/last-ts)): decisions +$da, agent turns +$(( $(turns) - t0 )), slack posts +$dp$( [ $dp -gt 0 ] && echo " → $(lastpost)")"
+  check "$1" "$da/$dp" "$4"
 }
+# check <name> <actual> <expected>: a failure goes to $R/failures (run-all fails on any).
+check() { [ "$2" = "$3" ] || { echo "   FAIL $1: got $2, expected $3"; echo "$1: got $2, expected $3" >> $R/failures; }; }
 gate() { # gate <name>: saves gates/<name>.json as the paired person
   $E/call.sh person bots.slackGate.store "{\"botId\":\"$B\",\"gate\":$(cat $R/gates/$1.json)}" | cut -c1-100
 }
@@ -24,3 +29,5 @@ told() { tail -1 $R/fake/anthropic.jsonl | python3 -c "import json,sys;t=json.lo
 
 # Waits until the server's Slack socket is back (after a restart).
 socket_back() { local n0=$1; for _ in $(seq 90); do [ "$(count $R/fake/calls.jsonl '"socket":"open"')" -gt "$n0" ] && return 0; sleep 1; done; echo "   (Slack socket not back)"; }
+# say <label> <actual> <expected>: prints the line and checks it.
+say() { echo "   $1: $2"; check "$1" "$2" "$3"; }

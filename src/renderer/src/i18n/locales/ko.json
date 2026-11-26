@@ -28187,6 +28187,8 @@
         "rulesCommandAsked": "OpenAI에 물음",
         "rulesCommandSaved": "저장된 규칙을 씀",
         "rulesCommandDecided": "직접 판정함",
+        "limitsHeld": "깨움 셈 파일을 읽지 못했습니다. {{at}}까지 제한이 있는 규칙은 봇을 깨우지 않습니다.",
+        "limitsHeldReplacing": "깨움 셈 파일을 읽지 못했습니다. 파일을 새로 쓸 때까지 제한이 있는 규칙은 봇을 깨우지 않습니다.",
         "failsClosed": "규칙 스크립트나 limit가 있으면 확인이 실패할 때 “확인이 실패하면” 설정과 상관없이 봇을 깨우지 않습니다.",
         "restore": "이전 Orca가 뺀 설정 되돌리기"
       }

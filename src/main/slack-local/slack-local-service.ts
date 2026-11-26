@@ -83,7 +83,7 @@ export class SlackLocalService {
         }
       },
       participation: (botId) => this.participations.of(botId),
-      canPost: (_botId, externalId) => canonicalLocalChat(deps.store, externalId)
+      canPost: (botId, externalId) => canonicalLocalChat(deps.store, externalId, botId)
     })
     this.watch = new SlackLocalWatch({
       runtime: deps.runtime,

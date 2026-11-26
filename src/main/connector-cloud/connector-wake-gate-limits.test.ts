@@ -2,7 +2,7 @@
 // its delivery was taken (or threw after the gate let it through), and tells the chat the gate's reason;
 // an automation event's count stays while its run is made, goes back when it can't be, and a count a
 // past run left is settled by that run's record: skipped never woke the bot, anything else may have.
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -12,7 +12,7 @@ import type { Automation } from '../../shared/automations/automation-definition'
 import type { AutomationRun } from '../../shared/automations/history/automation-run'
 import type { BotSlackGate } from '../../shared/bots/bot-slack-gate'
 import { toStoredSlackGate } from '../../shared/bots/slack-gate-store-form'
-import { useBotStateRoot } from '../bots/slack-gate/bot-state-file'
+import { BotStateFile, useBotStateRoot } from '../bots/slack-gate/bot-state-file'
 import type { decideSlackWake } from '../bots/slack-gate/slack-gate'
 import { takeSlackGateRun } from '../bots/slack-gate/slack-gate-runs'
 import { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
@@ -49,7 +49,7 @@ const reserving =
   (seen: string[] = []): typeof decideSlackWake =>
   async (_bot, event, options) => {
     seen.push(event.case)
-    const loaded = await counts.load('b1')
+    const loaded = await counts.load('b1', 0)
     if (!counts.open(loaded, event.channelId, 'banter', { perDay: 1 }, wallNow())) {
       return { verdict: 'block', reason: 'rate_limited', durationMs: 1 }
     }
@@ -91,7 +91,7 @@ const send: Extract<ConnectorDelivery, { kind: 'send' }> = {
   text: 'ha, nice'
 } as Extract<ConnectorDelivery, { kind: 'send' }>
 const open = async () =>
-  counts.open(await counts.load('b1'), 'C1', 'banter', { perDay: 1 }, wallNow())
+  counts.open(await counts.load('b1', 0), 'C1', 'banter', { perDay: 1 }, wallNow())
 
 it('keeps a start or send’s count only when the delivery was taken, and tells the chat why', async () => {
   const gate = wakeGate(reserving())
@@ -161,7 +161,7 @@ it('gives an automation event’s count back when its run can’t be made, and s
 it('settles a count a past run left by that run’s record: skipped goes back, dispatched stays', async () => {
   // The last process reserved for two runs and stopped before settling them.
   const before = new SlackGateWakeCounts({ now: Date.now, warn: () => {} })
-  const loaded = await before.load('b1')
+  const loaded = await before.load('b1', 0)
   for (const runId of ['skipped-run', 'dispatched-run']) {
     const reservation = before.reserve(loaded, {
       channelId: `C-${runId}`,
@@ -184,7 +184,41 @@ it('settles a count a past run left by that run’s record: skipped goes back, d
   await gate
     .triggerGate({ ...trigger, deliveryId: 't3' }, runEvent, undefined, () => {})!
     .reserve(automation)
-  const after = await counts.load('b1')
+  const after = await counts.load('b1', 0)
   expect(counts.open(after, 'C-skipped-run', 'banter', { perDay: 1 }, wallNow())).toBe(true)
   expect(counts.open(after, 'C-dispatched-run', 'banter', { perDay: 1 }, wallNow())).toBe(false)
+})
+
+it('holds limited rules for the gate’s longest cooldown when an automation event finds the counts file unreadable', async () => {
+  const file = new BotStateFile('bot-slack-gate-wakes', 'b1')
+  mkdirSync(join(file.path, '..'), { recursive: true })
+  writeFileSync(file.path, 'not json')
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: test fixture: only the fields the gate reads are set.
+  const weekly = toStoredSlackGate({
+    on: true,
+    kind: 'openai',
+    appliesTo: ['trigger'],
+    timeoutSeconds: 5,
+    onError: 'wake',
+    openai: {
+      questions: [{ type: 'predicate', name: 'banter', instructions: 'Banter?' }],
+      rules: [{ question: 'banter', wakeIf: { atLeast: 0.9 }, limit: { cooldownMinutes: 10_080 } }]
+    }
+  }) as BotSlackGate
+  const gate = createConnectorWakeGate({
+    bots: () => [{ ...bot, slackGate: weekly }],
+    botsEnabled: () => true,
+    linkedBot: () => 'b1',
+    mentionsKnown: () => true,
+    heldStart: () => false,
+    decide: async () => ({ verdict: 'block', reason: 'blocked', durationMs: 1 }),
+    counts,
+    runsOf: () => new Map()
+  })
+  await gate
+    .triggerGate({ ...trigger, deliveryId: 't9' }, runEvent, undefined, () => {})!
+    .reserve(automation)
+  const { heldUntil } = await counts.pendingStatus('b1')
+  expect(typeof heldUntil).toBe('number')
+  expect(Number(heldUntil)).toBeGreaterThanOrEqual(wallNow() + 10_079 * 60_000)
 })

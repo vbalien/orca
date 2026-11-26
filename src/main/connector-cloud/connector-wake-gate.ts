@@ -267,10 +267,9 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
         }
         if (decision.verdict === 'wake') {
           reservation = decision.reservation
-          // Only rules the owner saved give a reason here; a script's could carry message text, and the
-          // reason lives in memory until the run's prompt is made (never in its record).
-          const reason =
-            decision.wakeReason && decision.wakeReason.from === 'rules' ? decision.wakeReason : null
+          // The reason (rules' or script's, either may quote the message) lives in memory until the
+          // run's prompt is made, never in its record.
+          const reason = decision.wakeReason
           holdSlackGateRun(runId, {
             automationId: delivery.automationId,
             ...(reason ? { note: slackGateReasonNote(reason) } : {}),

@@ -8,6 +8,7 @@ import type {
   AutomationRun
 } from '../../shared/automations/history/automation-run'
 import type { SlackWakeDecision } from '../bots/slack-gate/slack-gate'
+import { slackGateRecoveryCooldown } from '../bots/slack-gate/slack-gate-openai-run'
 import { forgetSlackGateRuns, heldSlackGateRuns } from '../bots/slack-gate/slack-gate-runs'
 import type { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
 
@@ -50,17 +51,19 @@ export async function settleTriggerCounts(
   bot: Pick<Bot, 'id' | 'slackGate'>
 ): Promise<void> {
   const gate = bot.slackGate ? effectiveSlackGate(bot.slackGate) : null
-  const limited =
+  const waiting = heldSlackGateRuns()
+  const counted =
     gate?.kind === 'openai' &&
     (gate.rulesCommand !== undefined || slackGateRulesExtended(gate.openai).limits)
-  if (!deps.runsOf || !limited) {
+  if (!deps.runsOf || (!counted && waiting.length === 0)) {
     return
   }
   const counts = deps.counts
-  const loaded = await counts.load(bot.id)
-  const waiting = heldSlackGateRuns()
+  const loaded = counted ? await counts.load(bot.id, slackGateRecoveryCooldown(gate)) : null
   const waitingIds = new Set(waiting.map((run) => run.runId))
-  const unsettled = counts.unsettledRuns(loaded).filter((run) => !waitingIds.has(run.runId))
+  const unsettled = loaded
+    ? counts.unsettledRuns(loaded).filter((run) => !waitingIds.has(run.runId))
+    : []
   const ids = [
     ...new Set(
       [...unsettled, ...waiting].flatMap((run) => (run.automationId ? [run.automationId] : []))
@@ -73,12 +76,11 @@ export async function settleTriggerCounts(
   const statusOf = (automationId: string | undefined, runId: string) =>
     automationId ? runs.get(automationId)?.find((run) => run.id === runId)?.status : undefined
   const at = deps.now()
-  for (const run of unsettled) {
+  for (const run of loaded ? unsettled : []) {
     const status = statusOf(run.automationId, run.runId)
-    if (status === 'pending' || status === 'dispatching') {
-      continue
+    if (loaded && status !== 'pending' && status !== 'dispatching') {
+      counts.settleUnsettled(loaded, run.id, status && SKIPPED.includes(status) ? null : at)
     }
-    counts.settleUnsettled(loaded, run.id, status && SKIPPED.includes(status) ? null : at)
   }
   forgetSlackGateRuns((automationId, runId) => {
     const status = statusOf(automationId, runId)

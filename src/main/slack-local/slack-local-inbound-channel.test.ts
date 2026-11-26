@@ -50,7 +50,17 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 5))
 beforeEach(() => useBotStateRoot(mkdtempSync(join(tmpdir(), 'inbound-channel-'))))
 afterEach(() => useBotStateRoot(null))
 
-function harness(options: { links?: string[]; gate?: LocalSlackWakeGate; outcome?: string } = {}) {
+function harness(
+  options: {
+    links?: string[]
+    gate?: LocalSlackWakeGate
+    outcome?: string
+    now?: () => number
+    /** Runs after the chat admitted the message, before it answers. */
+    afterAdmit?: () => void
+    limitsClosed?: boolean
+  } = {}
+) {
   const links = new Set(options.links ?? [])
   const calls: { kind: 'start' | 'send'; key: string; note?: string }[] = []
   const decided: string[] = []
@@ -80,6 +90,7 @@ function harness(options: { links?: string[]; gate?: LocalSlackWakeGate; outcome
         ...(input.note ? { note: input.note } : {})
       })
       admit(input)
+      options.afterAdmit?.()
       links.add(key.externalId)
       return { conversation: key, initial: { outcome: options.outcome ?? 'accepted' } }
     },
@@ -118,7 +129,9 @@ function harness(options: { links?: string[]; gate?: LocalSlackWakeGate; outcome
         return { verdict: 'wake' }
       }),
     signal: new AbortController().signal,
-    participation
+    participation,
+    ...(options.now ? { now: options.now } : {}),
+    limitsClosed: async () => options.limitsClosed ?? false
   })
   return { inbound, calls, decided, reads, links, participation, bot }
 }
@@ -206,7 +219,7 @@ it('never lets a burst of channel messages push out a mention or its follow-up r
 
 it('keeps a limited rule’s count only when the chat took the message', async () => {
   const counts = new SlackGateWakeCounts({ now: Date.now, warn: () => {} })
-  const loaded = await counts.load('b1')
+  const loaded = await counts.load('b1', 0)
   const withCount = (): LocalSlackWakeGate => async () => {
     const reservation = counts.reserve(loaded, {
       channelId: 'C1',
@@ -229,4 +242,32 @@ it('keeps a limited rule’s count only when the chat took the message', async (
   await settled()
   expect(taken.calls[0]!.note).toContain('banter: join briefly')
   expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, wallNow())).toBe(false)
+})
+
+it('counts a limited wake on the day the chat took it, however late its answer comes', async () => {
+  const counts = new SlackGateWakeCounts({ now: Date.now, warn: () => {} })
+  const loaded = await counts.load('b1', 0)
+  // The chat takes it a second before local midnight and answers after.
+  let clock = new Date(2026, 10, 26, 23, 59, 59).getTime()
+  const nextDay = new Date(2026, 10, 27, 0, 0, 1).getTime()
+  const gate: LocalSlackWakeGate = async () => {
+    const reservation = counts.reserve(loaded, { channelId: 'C1', question: 'banter', at: clock })!
+    await reservation.persisted
+    return { verdict: 'wake', reservation }
+  }
+  const late = harness({ gate, now: () => clock, afterAdmit: () => (clock = nextDay) })
+  late.inbound.receive(message({}))
+  await settled()
+  expect(late.calls).toHaveLength(1)
+  expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, nextDay)).toBe(true)
+  expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, nextDay - 3000)).toBe(false)
+})
+
+it('reads and asks nothing when the gate’s limits already rule the message out', async () => {
+  const closed = harness({ limitsClosed: true })
+  closed.inbound.receive(message({}))
+  await settled()
+  expect(closed.reads).toEqual([])
+  expect(closed.decided).toEqual([])
+  expect(closed.calls).toEqual([])
 })

@@ -79,7 +79,8 @@ export async function deliverLocalSlack(
   asker: ConnectorAsker,
   verdict: LocalSlackWakeVerdict,
   admissible: () => boolean,
-  admitted: () => boolean
+  /** When the chat admitted it; undefined while it hasn't. */
+  admittedAt: () => number | undefined
 ): Promise<void> {
   const reservation = verdict.reservation
   const deliveryId = `slack-local:${message.teamId}:${message.channelId}:${message.ts}`
@@ -124,13 +125,14 @@ export async function deliverLocalSlack(
     }
   } catch (error) {
     // Thrown after the chat took it, the wake happened.
-    outcome = admitted() ? 'unknown' : 'refused'
+    outcome = admittedAt() !== undefined ? 'unknown' : 'refused'
     throw error
   } finally {
     const taken = outcome === 'accepted' || outcome === 'unknown'
+    const at = admittedAt()
     if (reservation) {
-      if (taken && admitted()) {
-        reservation.commit(deps.now())
+      if (taken && at !== undefined) {
+        reservation.commit(at)
       } else {
         reservation.release()
       }
