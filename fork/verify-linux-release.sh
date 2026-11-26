@@ -206,7 +206,7 @@ cleanup() {
         printf '앱 로그를 옮기지 못해 프로필을 남긴다: %s\n' "$p" >&2
       fi
     done
-    rm -rf "$W/dl" "$W/root" "$W/squashfs-root" "$W/aur" "$W/pkg" "$W/src" "$W/asar"
+    rm -rf "$W/dl" "$W/root" "$W/squashfs-root" "$W/aur" "$W/pkg" "$W/src"
     printf '\n실패. 로그·화면: %s\n' "$LOGS" >&2
   fi
 }
@@ -274,9 +274,28 @@ ok "Arch 패키지 $(basename "${pkgs[0]}")"
   .verifyPackagedOrcadTemplate(process.argv[1])" "$APP") >"$LOGS/template.log" 2>&1 ||
   fail "원격 서버 템플릿이 온전하지 않다($LOGS/template.log)"
 ok "원격 서버 템플릿(전체 대상)"
-node -e "require('@electron/asar').extractAll(process.argv[1], process.argv[2])" "$APP/app.asar" "$W/asar"
-! grep -rqw ORCA_FORK_BUILD "$W/asar/out/main" || fail "app.asar에 ORCA_FORK_BUILD가 치환되지 않고 남았다(define 누락)"
-grep -rqF 'Self-update is off in this fork build' "$W/asar/out/renderer" || fail "포크 업데이트 안내 문구가 없다"
+# asar 전체를 풀지 않는다: PKGBUILD가 (AUR처럼) 다른 OS용 unpacked 파일을 지워 extractAll이 실패한다.
+# out/main·out/renderer의 JS만 읽는다(asar 안의 것, 또는 디스크에 남은 unpacked 것).
+asar_check=$(node -e '
+const asar = require("@electron/asar"), fs = require("fs"), path = require("path")
+const [archive] = process.argv.slice(1)
+const r = { mainFiles: 0, mainHasDefine: false, rendererHasNotice: false }
+for (const entry of asar.listPackage(archive)) {
+  const rel = entry.replace(/^[\\/]+/, "").split(path.sep).join("/")
+  if (!/^out\/(main|renderer)\/.*\.(js|cjs|mjs)$/.test(rel)) continue
+  const st = asar.statFile(archive, rel)
+  if (!st || !("size" in st)) continue
+  const onDisk = path.join(archive + ".unpacked", rel)
+  if (st.unpacked && !fs.existsSync(onDisk)) continue
+  const text = (st.unpacked ? fs.readFileSync(onDisk) : asar.extractFile(archive, rel)).toString()
+  if (rel.startsWith("out/main/")) { r.mainFiles++; if (/\bORCA_FORK_BUILD\b/.test(text)) r.mainHasDefine = true }
+  else if (text.includes("Self-update is off in this fork build")) r.rendererHasNotice = true
+}
+console.log(JSON.stringify(r))' "$APP/app.asar") || fail "app.asar를 읽지 못했다"
+printf '%s\n' "$asar_check" >"$LOGS/asar-check.json"
+[[ "$asar_check" == *'"mainHasDefine":false'* && "$asar_check" != *'"mainFiles":0,'* ]] ||
+  fail "app.asar에 ORCA_FORK_BUILD가 치환되지 않고 남았거나 main 번들이 없다($LOGS/asar-check.json)"
+[[ "$asar_check" == *'"rendererHasNotice":true'* ]] || fail "포크 업데이트 안내 문구가 없다($LOGS/asar-check.json)"
 ok "define 치환·안내 문구(실제 값은 아래 실행 중 확인)"
 
 # 4) 시스템 electron으로 네이티브 모듈과 CLI
@@ -432,7 +451,7 @@ node -e 'const fs=require("fs"); fs.writeFileSync(process.argv[3], JSON.stringif
   "$W/release-snapshot.json" "$TAG" "$W/verified.json" "$release_sha"
 PASSED=1
 echo "자동 확인 끝. 게시 전에 사람이 할 확인(끝나면 fork/publish-release.sh $TAG --screens-checked):"
-cat "$W/src/fork/screen-checks.txt"
+cat "$(dirname "${BASH_SOURCE[0]}")/screen-checks.txt" # 실행 중인 스크립트 옆의 최신 안내(publish-release.sh와 같은 파일)
 if [[ -n "$KEEP" ]]; then
   echo "Arch 방식 앱을 띄운 채 둔다: CDP http://127.0.0.1:$LAST_PORT , DISPLAY=:$display , 화면·로그 $LOGS"
   printf '끝내기: fork/verify-linux-release.sh --stop %q\n' "$W"
