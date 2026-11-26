@@ -54,7 +54,7 @@ export type BotSlackGate = z.infer<typeof BotSlackGateSchema>
 export type SlackGateEvent = {
   eventId: string
   case: SlackGateCase
-  /** The source can't tell a mention from a plain reply: either selected case applies. */
+  /** The source can't tell a mention from a plain reply: checked only when both are selected. */
   mentionUnknown?: true
   teamId: string
   channelId: string
@@ -82,14 +82,12 @@ function caseApplies(
   appliesTo: readonly SlackGateCase[],
   entry: { case: SlackGateCase; mentionUnknown?: true }
 ): boolean {
-  if (appliesTo.includes(entry.case)) {
-    return true
+  // A missed mention costs more than a needless wake: a message that may be either is checked
+  // only when both are.
+  if (entry.mentionUnknown) {
+    return appliesTo.includes('mention') && appliesTo.includes('thread_reply')
   }
-  return (
-    entry.mentionUnknown === true &&
-    (entry.case === 'thread_reply' || entry.case === 'mention') &&
-    (appliesTo.includes('mention') || appliesTo.includes('thread_reply'))
-  )
+  return appliesTo.includes(entry.case)
 }
 
 /** The one applicability rule: the gate is on and the event, or any message in its turn, is selected. */
