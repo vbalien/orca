@@ -2,9 +2,8 @@
 // gate reads the message with every "this is incomplete" mark intact.
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Bot } from '../../shared/bot-types'
-import type { SlackGateEvent } from '../../shared/bots/bot-slack-gate'
 import type { SlackWakeDecision } from '../bots/slack-gate/slack-gate'
-import type { BotSlackGate } from '../../shared/bots/bot-slack-gate'
+import type { BotSlackGate, SlackGateEvent } from '../../shared/bots/bot-slack-gate'
 import { slackGateOpenAIRequest } from '../../shared/bots/slack-gate-openai-request'
 import { SLACK_GATE_DEFAULT_RULES } from '../../shared/bots/slack-gate-default-rules'
 import type { SlackGateRulesConfig } from '../../shared/bots/slack-gate-rules-config'
