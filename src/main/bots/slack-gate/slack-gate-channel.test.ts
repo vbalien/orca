@@ -9,7 +9,7 @@ import type { BotSlackGate, SlackGateEvent } from '../../../shared/bots/bot-slac
 import type { SlackGateRulesConfig } from '../../../shared/bots/slack-gate-rules-config'
 import { useBotStateRoot } from './bot-state-file'
 import { SlackGateDecider, type SlackGateDeps } from './slack-gate'
-import type { SlackGateCommandOutcome } from './slack-gate-command'
+import { runSlackGateCommand, type SlackGateCommandOutcome } from './slack-gate-command'
 import type { SlackGateAnswer } from './slack-gate-openai'
 import { SlackGateWakeCounts } from './slack-gate-wake-counts'
 
@@ -358,5 +358,56 @@ it('gives back the count of a verdict that came after the gate gave up on it', a
     const loaded = await counts.load('b1', 0)
     expect((await counts.pendingStatus('b1')).pending).toBe(0)
     expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, Date.now())).toBe(true)
+  })
+})
+
+it('rolls chance once per event and rule, before asking, and reserves nothing when it says no', async () => {
+  const rolls = [0.7, 0.2]
+  const random = vi.fn(() => rolls.shift() ?? 0)
+  const answers: Record<string, SlackGateAnswer> = { banter: predicate(0.95) }
+  const { decider: d, asked } = decider({
+    random,
+    askOpenAI: async (input) => {
+      asked.push({ config: input.config })
+      return { kind: 'answers', answers }
+    }
+  })
+  const sometimes = gate({
+    openai: {
+      ...limited,
+      questions: [limited.questions[1]!],
+      rules: [{ question: 'banter', wakeIf: { atLeast: 0.9 }, limit: { chance: 0.5 } }]
+    }
+  })
+  // 0.7 is past one in two: the only way to wake is closed, so OpenAI isn't asked.
+  expect(await d.decide(bot(sometimes), channel())).toMatchObject({
+    verdict: 'block',
+    reason: 'rate_limited'
+  })
+  expect(asked).toHaveLength(0)
+  expect((await counts.pendingStatus('b1')).pending).toBe(0)
+  // 0.2 lets it through: asked once, and the same roll decides after the answer (no second roll).
+  const woke = await d.decide(bot(sometimes), channel({ eventId: 'e2' }))
+  expect(woke).toMatchObject({ verdict: 'wake' })
+  expect(asked).toHaveLength(1)
+  expect(random).toHaveBeenCalledTimes(2)
+  woke.reservation!.release()
+})
+
+it('takes a rules script’s output up to 64 KiB, and fails the check past it, with the real runner', async () => {
+  // Valid JSON padded with spaces: only its size differs.
+  const printing = (spaces: number) =>
+    `printf '{"useSaved":true}'; head -c ${spaces} /dev/zero | tr '\\0' ' '`
+  const { decider: d } = decider({ runCommand: runSlackGateCommand })
+  const under = await d.decide(bot(gate({ rulesCommand: printing(64 * 1024 - 100) })), channel())
+  expect(under).toMatchObject({ verdict: 'wake', rulesFrom: 'saved' })
+  const over = await d.decide(
+    bot(gate({ rulesCommand: printing(64 * 1024 + 100) })),
+    channel({ eventId: 'e2' })
+  )
+  expect(over).toMatchObject({
+    verdict: 'block',
+    reason: 'error',
+    error: 'The rules script printed too much'
   })
 })
