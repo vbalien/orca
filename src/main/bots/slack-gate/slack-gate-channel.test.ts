@@ -394,20 +394,58 @@ it('rolls chance once per event and rule, before asking, and reserves nothing wh
   woke.reservation!.release()
 })
 
-it('takes a rules script’s output up to 64 KiB, and fails the check past it, with the real runner', async () => {
-  // Valid JSON padded with spaces: only its size differs.
-  const printing = (spaces: number) =>
-    `printf '{"useSaved":true}'; head -c ${spaces} /dev/zero | tr '\\0' ' '`
-  const { decider: d } = decider({ runCommand: runSlackGateCommand })
-  const under = await d.decide(bot(gate({ rulesCommand: printing(64 * 1024 - 100) })), channel())
-  expect(under).toMatchObject({ verdict: 'wake', rulesFrom: 'saved' })
-  const over = await d.decide(
-    bot(gate({ rulesCommand: printing(64 * 1024 + 100) })),
-    channel({ eventId: 'e2' })
-  )
-  expect(over).toMatchObject({
-    verdict: 'block',
-    reason: 'error',
-    error: 'The rules script printed too much'
+// The real runner runs commands through /bin/sh; Windows has its own (unsupported) answer.
+it.skipIf(process.platform === 'win32')(
+  'takes a rules script’s output up to 64 KiB, and fails the check past it, with the real runner',
+  async () => {
+    // Valid JSON padded with spaces: only its size differs.
+    const printing = (spaces: number) =>
+      `printf '{"useSaved":true}'; head -c ${spaces} /dev/zero | tr '\\0' ' '`
+    const { decider: d } = decider({ runCommand: runSlackGateCommand })
+    const under = await d.decide(bot(gate({ rulesCommand: printing(64 * 1024 - 100) })), channel())
+    expect(under).toMatchObject({ verdict: 'wake', rulesFrom: 'saved' })
+    const over = await d.decide(
+      bot(gate({ rulesCommand: printing(64 * 1024 + 100) })),
+      channel({ eventId: 'e2' })
+    )
+    expect(over).toMatchObject({
+      verdict: 'block',
+      reason: 'error',
+      error: 'The rules script printed too much'
+    })
+  }
+)
+
+it('queues Orca Cloud slack.message events with channel messages, so they never hold up a mention', async () => {
+  const waiting = new Map<string, () => void>()
+  const { decider: d } = decider({
+    askOpenAI: (input) =>
+      new Promise((resolve) =>
+        waiting.set(input.event.eventId, () =>
+          resolve({ kind: 'answers', answers: { asks: predicate(0.9) } })
+        )
+      )
   })
+  const triggers = gate({ appliesTo: ['trigger', 'mention'], channelMessages: undefined })
+  const message = (eventId: string) =>
+    channel({
+      eventId,
+      case: 'trigger',
+      trigger: { automationId: 'a', triggerId: 'r', event: 'message' }
+    })
+  const first = d.decide(bot(triggers), message('t1'))
+  const second = d.decide(bot(triggers), message('t2'))
+  const mention = d.decide(bot(triggers), channel({ eventId: 'm', case: 'mention' }))
+  // One channel check at a time; the mention runs beside it, not behind the second.
+  await vi.waitFor(() => expect([...waiting.keys()].sort()).toEqual(['m', 't1']))
+  for (const id of ['m', 't1']) {
+    waiting.get(id)!()
+  }
+  await vi.waitFor(() => expect(waiting.has('t2')).toBe(true))
+  waiting.get('t2')!()
+  expect((await Promise.all([first, second, mention])).map((d) => d.verdict)).toEqual([
+    'wake',
+    'wake',
+    'wake'
+  ])
 })

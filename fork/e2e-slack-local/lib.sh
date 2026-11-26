@@ -35,3 +35,5 @@ told() { tail -1 $R/fake/anthropic.jsonl | python3 -c "import json,sys;t=json.lo
 socket_back() { local n0=$1; for _ in $(seq 90); do [ "$(count $R/fake/calls.jsonl '"socket":"open"')" -gt "$n0" ] && return 0; sleep 1; done; echo "   (Slack socket not back)"; }
 # say <label> <actual> <expected>: prints the line and checks it.
 say() { echo "   $1: $2"; check "$1" "$2" "$3"; }
+# Waits until the agent sent nothing for 15 s (a failing turn's retries are over), at most 4 minutes.
+agent_quiet() { local n last=-1 still=0; for _ in $(seq 240); do n=$(turns); if [ "$n" = "$last" ]; then still=$((still + 1)); [ $still -ge 15 ] && return 0; else still=0; last=$n; fi; sleep 1; done; echo "   (agent never went quiet)"; }

@@ -55,7 +55,12 @@ export const StateFile = z.object({
 export type CountEntry = z.infer<typeof Count>
 export type PendingEntry = z.infer<typeof Pending>
 /** `creating`: a trigger's run is still being made; reconciling leaves it alone. */
-export type LiveEntry = PendingEntry & { phase: ReservationPhase; creating?: boolean }
+/** `orphan`: a trigger's reservation read back after a restart, which no hook in this process settles. */
+export type LiveEntry = PendingEntry & {
+  phase: ReservationPhase
+  creating?: boolean
+  orphan?: true
+}
 
 export type ReservationPhase = 'waiting' | 'delivering' | 'settled'
 

@@ -392,7 +392,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             </Select>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={!gate || saving} onClick={() => save(gate)}>
             {t('bots.slack.gate.save', 'Save')}
           </Button>

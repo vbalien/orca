@@ -338,7 +338,7 @@ it('counts an old, no longer kept rule as new under the key cap', async () => {
   expect(store.reserve(bot, { channelId: 'C1', question: 'old', at: now })).toBeNull()
 })
 
-it('counts a trigger’s reservation no run record settled within a day at its own time', async () => {
+it('counts a trigger’s reservation read back after a restart once no run record settled it in a day, and leaves one this process holds to its run', async () => {
   const store = counts()
   const bot = await store.load('b1', 0)
   const reservation = store.reserve(bot, {
@@ -350,11 +350,17 @@ it('counts a trigger’s reservation no run record settled within a day at its o
   })!
   reservation.creating = false
   await reservation.persisted
-  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(false)
-  // A day and a bit on, with nothing reconciling it: it counted on its own day, and today is free.
+  // This process still holds it: a day on it waits for its run, and counts when the run started.
   advance(86_400_000 + 60_000)
-  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(true)
-  expect((await store.pendingStatus('b1')).pending).toBe(0)
+  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(false)
+  expect((await store.pendingStatus('b1')).pending).toBe(1)
+  // After a restart nothing will settle it: counted now (as a run with no record), and gone.
+  const restarted = counts()
+  const again = await restarted.load('b1', 0)
+  expect(restarted.open(again, 'C1', 'banter', daily, now)).toBe(false)
+  expect((await restarted.pendingStatus('b1')).pending).toBe(0)
+  advance(86_400_000)
+  expect(restarted.open(again, 'C1', 'banter', daily, now)).toBe(true)
 })
 
 it('warns once a minute per bot and cause, never hiding another bot’s', () => {

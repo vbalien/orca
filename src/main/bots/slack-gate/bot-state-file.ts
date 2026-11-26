@@ -13,6 +13,11 @@ export function useBotStateRoot(root: string | null): void {
   rootOverride = root
 }
 
+/** The test root in use (null in the app). */
+export function botStateRoot(): string | null {
+  return rootOverride
+}
+
 export type BotStateRead =
   | { kind: 'missing' }
   | { kind: 'ok'; value: unknown }
@@ -21,6 +26,8 @@ export type BotStateRead =
 export class BotStateFile {
   private tail: Promise<unknown> = Promise.resolve()
   private closed = false
+  // A test's root as it was when this file was made, so a late write never lands in the next test's.
+  private readonly root = rootOverride
 
   constructor(
     private readonly folder: string,
@@ -29,7 +36,7 @@ export class BotStateFile {
 
   get path(): string {
     const name = createHash('sha256').update(this.botId).digest('hex').slice(0, 32)
-    return join(rootOverride ?? getCanonicalUserDataPath(), this.folder, `${name}.json`)
+    return join(this.root ?? getCanonicalUserDataPath(), this.folder, `${name}.json`)
   }
 
   async read(): Promise<BotStateRead> {

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import * as z from 'zod'
 import { BotSlackGateSchema, type BotSlackGate } from '../../../shared/bots/bot-slack-gate'
 import { oldSchemaView, slackGateUsesNewerFields } from '../../../shared/bots/slack-gate-store-form'
-import { BotStateFile } from './bot-state-file'
+import { BotStateFile, botStateRoot } from './bot-state-file'
 
 const FOLDER = 'bot-slack-gate-copies'
 const CopyFile = z.object({ v: z.literal(1), gate: z.unknown(), oldView: z.string() })
@@ -39,10 +39,12 @@ export function sameSlackGate(
 const files = new Map<string, BotStateFile>()
 const lines = new Map<string, Promise<unknown>>()
 const fileOf = (botId: string) => {
-  let file = files.get(botId)
+  // Keyed by the root too: a test's files never stand in for the next test's.
+  const key = `${botStateRoot() ?? ''}\0${botId}`
+  let file = files.get(key)
   if (!file) {
     file = new BotStateFile(FOLDER, botId)
-    files.set(botId, file)
+    files.set(key, file)
   }
   return file
 }
@@ -94,6 +96,6 @@ export async function restorableSlackGate(
 export function forgetSlackGateCopy(botId: string): Promise<void> {
   return inLine(botId, async () => {
     await fileOf(botId).remove()
-    files.delete(botId)
+    files.delete(`${botStateRoot() ?? ''}\0${botId}`)
   })
 }

@@ -21,7 +21,7 @@ export function serializeCounts(bot: BotCounts, now: number): unknown {
     ),
     pending: [...bot.pending.values()]
       .filter((entry) => entry.phase !== 'settled')
-      .map(({ phase: _phase, creating: _creating, ...entry }) => entry)
+      .map(({ phase: _phase, creating: _creating, orphan: _orphan, ...entry }) => entry)
   }
 }
 
@@ -152,13 +152,11 @@ export function channelWakesOf(
   return { wakes, pulled }
 }
 
-/** A trigger's reservation left unreconciled a day on (Orca Cloud no longer brings this bot events
- *  that would reconcile it, or its run's record is gone). */
+/** A trigger's reservation read back after a restart and left unreconciled a day on (Orca Cloud no
+ *  longer brings this bot events that would reconcile it, or its run's record is gone). */
 export function staleTriggerCounts(bot: BotCounts, at: number, afterMs: number): string[] {
   return [...bot.pending.values()].flatMap((entry) =>
-    entry.phase !== 'settled' && entry.runId && !entry.creating && at - entry.at >= afterMs
-      ? [entry.id]
-      : []
+    entry.phase !== 'settled' && entry.orphan && at - entry.at >= afterMs ? [entry.id] : []
   )
 }
 

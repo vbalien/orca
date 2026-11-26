@@ -42,7 +42,7 @@ const FOLDER = 'bot-slack-gate-wakes'
 export const RESERVATION_WAIT_MS = 2 * 60_000
 const MAX_PENDING = 200
 const MAX_KEYS = 1000
-// A trigger's count still unreconciled after this long counts at its own time.
+// A trigger's count read back after a restart and still unreconciled after this long counts.
 const STALE_TRIGGER_MS = 86_400_000
 const OLD_PENDING_WARN_MS = 10 * 60_000
 
@@ -120,7 +120,7 @@ export class SlackGateWakeCounts {
     let changed = false
     for (const entry of state.pending ?? []) {
       if (entry.runId) {
-        bot.pending.set(entry.id, { ...entry, phase: 'delivering' })
+        bot.pending.set(entry.id, { ...entry, phase: 'delivering', orphan: true })
       } else {
         countWake(bot, entry, now)
         changed = true
@@ -304,14 +304,13 @@ export class SlackGateWakeCounts {
     )
   }
 
-  /** A trigger's count no run record settled in a day (Orca Cloud stopped bringing this bot events,
-   *  say) counts at its own time, conservatively, rather than hold its limit for good. */
+  /** A trigger's count read back after a restart that no run record settled in a day (Orca Cloud
+   *  stopped bringing this bot events, say) counts now, rather than hold its limit for good. One this
+   *  process holds is left to its run's hooks. */
   private settleStale(bot: BotCounts, at: number): void {
     for (const id of staleTriggerCounts(bot, at, STALE_TRIGGER_MS)) {
-      const entry = bot.pending.get(id)
-      if (entry) {
-        this.settleUnsettled(bot, id, entry.at)
-      }
+      // As a run with no record would be (plan "기록이 없음 → 확정"): counted now, conservatively.
+      this.settleUnsettled(bot, id, at)
     }
   }
 

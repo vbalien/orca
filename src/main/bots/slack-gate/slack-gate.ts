@@ -158,7 +158,8 @@ export class SlackGateDecider {
     options.signal?.addEventListener('abort', onCancel, { once: true })
     let outcome: SlackGateOutcome | undefined
     try {
-      const lane = event.case === 'channel_message' ? 'channel' : 'main'
+      // Channel messages (an own app's, or Orca Cloud's slack.message events) queue apart.
+      const lane = isChannelMessage(event) ? 'channel' : 'main'
       outcome = await this.slots.run(bot.id, lane, stop.signal, () =>
         this.run(bot, gate, event, stop.signal, timeoutAt, options.run)
       )
