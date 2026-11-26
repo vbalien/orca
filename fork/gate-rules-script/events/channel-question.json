@@ -1,0 +1,9 @@
+{
+  "eventId": "try-1",
+  "case": "channel_message",
+  "teamId": "T0",
+  "channelId": "C0000000001",
+  "placeKind": "public_channel",
+  "from": { "userId": "U0", "role": "member" },
+  "text": "Does anyone know where we wrote down the release checklist?"
+}

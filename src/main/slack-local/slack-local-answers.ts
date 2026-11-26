@@ -1,6 +1,7 @@
 // Each listening bot's answer sender, kept across its reconnects so a token change loses no answer.
 import { hostname } from 'node:os'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
+import type { SlackLocalParticipation } from './slack-local-participation'
 import { SlackLocalReplies, type SlackLocalRepliesDeps } from './slack-local-replies'
 import type { SlackFetch } from './slack-web-api'
 
@@ -17,6 +18,8 @@ export class SlackLocalAnswers {
       credentials: (botId: string) => ReturnType<SlackLocalRepliesDeps['current']>
       onError: (botId: string, code: string) => void
       onDelivered: (botId: string) => void
+      participation?: (botId: string) => SlackLocalParticipation
+      canPost?: (botId: string, externalId: string, paneKey: string) => boolean
     }
   ) {}
 
@@ -50,7 +53,14 @@ export class SlackLocalAnswers {
       hostName: () => hostname(),
       signal: abort.signal,
       onError: (code) => this.deps.onError(botId, code),
-      onDelivered: () => this.deps.onDelivered(botId)
+      onDelivered: () => this.deps.onDelivered(botId),
+      ...(this.deps.participation ? { participation: this.deps.participation(botId) } : {}),
+      ...(this.deps.canPost
+        ? {
+            canPost: (externalId: string, paneKey: string) =>
+              this.deps.canPost!(botId, externalId, paneKey)
+          }
+        : {})
     })
     this.senders.set(botId, { replies, abort })
     return replies

@@ -39,7 +39,8 @@ describe('decideSlackGateRules', () => {
       wake: true,
       answers: { asks: 0.9, chat: 0.1, topic: 'deploy' },
       rules: ['pass', 'fail', 'pass'],
-      score: 0.9
+      score: 0.9,
+      reasonRule: 0
     })
     expect(decideSlackGateRules(config({}), answers(0.9, 0.85, 'deploy')).wake).toBe(false)
     expect(decideSlackGateRules(config({}), answers(0.9, 0.1, 'other')).wake).toBe(false)

@@ -271,7 +271,9 @@ export function dispatchDelivery(
         seam,
         key,
         inTurn,
-        settle(async () => (await seam.start(gated, key, deliveryId, input)).initial)
+        settle(() =>
+          gated.settle(async () => (await seam.start(gated, key, deliveryId, input)).initial)
+        )
       )
       break
     }
@@ -292,7 +294,7 @@ export function dispatchDelivery(
         seam,
         key,
         inTurn,
-        settle(() => seam.send(gated, key, deliveryId, message))
+        settle(() => gated.settle(() => seam.send(gated, key, deliveryId, message)))
       )
       break
     }

@@ -28097,7 +28097,8 @@
           "mention": "멘션",
           "dm": "DM",
           "threadReply": "봇 스레드의 답글",
-          "trigger": "자동화 이벤트"
+          "trigger": "자동화 이벤트",
+          "channelMessage": "채널 글(내 Slack 앱)"
         },
         "hostTooOld": "OpenAI Decisions 확인을 쓰려면 이 봇 컴퓨터의 Orca를 업데이트하세요.",
         "unknownKind": "이 봇 컴퓨터의 Orca가 이 Orca가 모르는 확인 방식(예: TypeSafe Jev)을 쓰고 있고, 그쪽에서는 아직 돌 수 있습니다. 그 Orca를 업데이트하거나 확인을 제거하세요.",
@@ -28115,14 +28116,16 @@
           "helpQuestions": "\"questions\": OpenAI Decisions 질문 목록. 질문마다 겹치지 않는 \"name\"과 \"instructions\"를 씁니다 — predicate(예/아니요, 답은 확률 0~1), choice(\"choices\": [{ \"value\", \"description\" }], 값은 글자 또는 true/false), score(\"levels\": [{ \"label\", \"description\" }], 낮은 것부터; 답은 0~단계 수−1).",
           "helpSend": "\"send\": OpenAI에 보낼 글 정보, 각각 true/false. earlierMessages와 laterMessages는 숫자(마지막 N개만)도 됩니다. earlierSpeakers를 켜면 앞 글마다 this_bot, app, person, note 중 누가 썼는지 붙습니다. 빼면 기본값. 쓸 수 있는 키: {{keys}}.",
           "helpExtra": "\"extra\": 함께 보낼 고정 값(예: 봇이 하는 일).",
-          "helpRules": "\"rules\": { \"question\", \"wakeIf\" 또는 \"blockIf\": { \"atLeast\" | \"atMost\": n } 또는 { \"oneOf\": [선택지] }, 선택 \"unsureFrom\": n }. 통과한 blockIf가 하나라도 있으면 막고, wakeIf 규칙은 \"combine\"(all | any)으로 합칩니다. unsureFrom과 기준 사이의 애매한 값은 \"whenUnsure\"(block | wake)가 정합니다.",
+          "helpRules": "\"rules\": { \"question\", \"wakeIf\" 또는 \"blockIf\": { \"atLeast\" | \"atMost\": n } 또는 { \"oneOf\": [선택지] }, 선택 \"unsureFrom\": n, \"note\": 깨우는 이유(봇에게 전달), \"limit\": { \"perDay\", \"cooldownMinutes\", \"chance\" } }. 통과한 blockIf가 하나라도 있으면 막습니다. wakeIf 규칙은 \"combine\"(all | any)으로 합칩니다. \"whenUnsure\"(block | wake)는 unsureFrom과 기준 사이 구간을 정하지만, 채널 글은 애매하면 깨우지 않습니다. limit는 채널·규칙마다 세고, 하루는 봇 컴퓨터의 현지 자정부터입니다. 내 Slack 앱의 모든 경우와 자동화 이벤트에서 셉니다.",
           "preview": "요청 미리 보기",
           "previewInvalid": "JSON을 고치면 요청을 볼 수 있습니다.",
           "dialogHelp": "여기서 고치면 카드의 글과 같은 글이 바뀝니다.",
           "example": {
             "default": "기본값: 봇에게 한 말이 아닌 답글은 건너뛰기",
             "smallTalk": "사람끼리 잡담이면 막기",
-            "topic": "주제와 급한 정도로 고르기"
+            "topic": "주제와 급한 정도로 고르기",
+            "channel": "채널 글: 봇에게 묻는 글만",
+            "banter": "채널 글 + 하루 몇 번 잡담 끼기"
           },
           "issue": {
             "syntax": "올바른 JSON이 아닙니다.",
@@ -28156,11 +28159,39 @@
             "unsureSide": "unsureFrom은 atLeast보다 작거나 atMost보다 커야 합니다.",
             "unsureChoice": "unsureFrom은 atLeast나 atMost와만 씁니다.",
             "unused": "“{{question}}”을(를) 쓰는 규칙이 없습니다.",
-            "enum": "다음 중 하나여야 합니다: {{allowed}}."
+            "enum": "다음 중 하나여야 합니다: {{allowed}}.",
+            "limitOnBlock": "limit는 wakeIf 규칙에만 둘 수 있습니다.",
+            "limitNeedsAny": "limit가 있고 wakeIf 규칙이 여럿이면 \"combine\": \"any\"로 하세요.",
+            "limitQuestionShared": "다른 wakeIf 규칙도 “{{question}}”를 씁니다. limit가 있는 규칙은 질문을 혼자 써야 합니다."
           },
           "line": "{{line}}번째 줄",
-          "helpMentions": "기본 규칙은 스레드 답글용이고 멘션은 확인 없이 깨웁니다. Orca Cloud가 답글과 구별하지 못하는 글(봇이 아직 대화하지 않는 스레드의 첫 글)은 멘션과 답글을 둘 다 확인할 때만 확인합니다. 멘션을 확인하게 하면 아주 짧은 멘션은 봇에게 한 말이 아닌 것으로 읽힐 수 있습니다."
-        }
+          "helpMentions": "기본 규칙은 스레드 답글용이고 멘션은 확인 없이 깨웁니다. Orca Cloud가 답글과 구별하지 못하는 글(봇이 아직 대화하지 않는 스레드의 첫 글)은 멘션과 답글을 둘 다 확인할 때만 확인합니다. 멘션을 확인하게 하면 아주 짧은 멘션은 봇에게 한 말이 아닌 것으로 읽힐 수 있습니다.",
+          "previewChannel": "채널 글로 미리 보기"
+        },
+        "hostTooOldNewer": "채널 글, 규칙 스크립트, note, limit을 쓰려면 이 봇이 도는 컴퓨터의 Orca를 업데이트하세요.",
+        "restored": "게이트 설정을 되돌렸습니다.",
+        "channel": {
+          "rulesSwitched": "규칙을 스레드 답글 + 채널 글 기본값으로 바꿨습니다.",
+          "ids": "확인할 채널",
+          "idsInvalid": "채널 ID를 1~{{max}}개, 쉼표로 나눠 넣으세요(C 또는 G로 시작).",
+          "idsHelp": "Slack에서 채널 이름을 누르고 맨 아래의 채널 ID를 복사하세요. 봇도 그 채널에 초대해야 합니다.",
+          "notice": "이 채널들에서 물어볼 수 있는 사람이 쓰는 모든 글이 판단을 위해 OpenAI(또는 내 명령)로 갑니다. 글마다 요청 하나입니다. 확인이 실패하거나 애매하면 채널 글로는 봇이 깨어나지 않습니다.",
+          "noCase": "이 규칙은 채널 글과 스레드 답글을 구분하지 않습니다(“case”를 보내지 않음). 구분하는 규칙에서 시작하려면 “채널 글” 예시를 넣으세요."
+        },
+        "standIn": "이전 버전의 Orca가 새 설정을 빼고 이 규칙을 저장했습니다. 되돌릴 때까지 이 확인은 확인하는 모든 메시지를 막습니다.",
+        "rulesCommand": "규칙을 정하는 스크립트(선택)",
+        "rulesCommandHelp": "글마다 stdin으로 JSON을 받아 OpenAI에 물을 규칙을 내거나 직접 판정합니다. 키는 받지 않습니다. 봇 폴더 밖에 두세요. 봇의 에이전트가 같은 사용자로 돌아 고칠 수 있습니다.",
+        "rulesCommandRemote": "{{computer}}의 Orca에서 정합니다. 스크립트가 거기서 돌기 때문에 그 컴퓨터만 고를 수 있습니다.",
+        "rulesCommandFailed": "마지막 실행 {{at}}: 실패({{error}}).",
+        "rulesCommandRan": "마지막 실행 {{at}}: {{outcome}}.",
+        "rulesCommandAsked": "OpenAI에 물음",
+        "rulesCommandSaved": "저장된 규칙을 씀",
+        "rulesCommandDecided": "직접 판정함",
+        "limitsHeld": "깨움 셈 파일을 읽지 못했습니다. {{at}}까지 제한이 있는 규칙은 봇을 깨우지 않습니다.",
+        "copyNotKept": "옛 Orca 버전을 위한 이 설정의 사본을 남기지 못했습니다. 옛 버전이 이 봇을 저장하면 Restore로 되돌릴 수 없습니다.",
+        "limitsHeldReplacing": "깨움 셈 파일을 읽지 못했습니다. 파일을 새로 쓸 때까지 제한이 있는 규칙은 봇을 깨우지 않습니다.",
+        "failsClosed": "규칙 스크립트나 limit가 있으면 확인이 실패할 때 “확인이 실패하면” 설정과 상관없이 봇을 깨우지 않습니다.",
+        "restore": "이전 Orca가 뺀 설정 되돌리기"
       }
     },
     "automations": {

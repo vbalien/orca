@@ -28032,7 +28032,8 @@
           "mention": "Mentions",
           "dm": "Direct messages",
           "threadReply": "Replies in its threads",
-          "trigger": "Automation events"
+          "trigger": "Automation events",
+          "channelMessage": "Channel messages (your own Slack app)"
         },
         "hostTooOld": "Update Orca on this bot’s computer to use OpenAI Decisions checks.",
         "unknownKind": "Orca on this bot’s computer uses a check this Orca does not know (such as TypeSafe Jev), and may still run it. Update Orca there, or remove the check.",
@@ -28050,14 +28051,16 @@
           "helpQuestions": "\"questions\": a list of OpenAI Decisions questions, each with a unique \"name\" and \"instructions\" — predicate (yes/no, answered as a probability 0–1), choice (\"choices\": [{ \"value\", \"description\" }], values text or true/false) or score (\"levels\": [{ \"label\", \"description\" }], lowest first; answered 0 to levels − 1).",
           "helpSend": "\"send\": what OpenAI gets about the message, each true/false; earlierMessages and laterMessages may be a number (keep the last N); earlierSpeakers marks each earlier message from this_bot, app, person or note. Leave it out for the default. Keys: {{keys}}.",
           "helpExtra": "\"extra\": fixed values sent along, e.g. what the bot does.",
-          "helpRules": "\"rules\": { \"question\", \"wakeIf\" or \"blockIf\": { \"atLeast\" | \"atMost\": n } or { \"oneOf\": [choices] }, optional \"unsureFrom\": n }. Any passing blockIf blocks; wakeIf rules combine by \"combine\" (all | any); \"whenUnsure\" (block | wake) decides the band between unsureFrom and the limit.",
+          "helpRules": "\"rules\": { \"question\", \"wakeIf\" or \"blockIf\": { \"atLeast\" | \"atMost\": n } or { \"oneOf\": [choices] }, optional \"unsureFrom\": n, \"note\": why it wakes (told to the bot), \"limit\": { \"perDay\", \"cooldownMinutes\", \"chance\" } }. Any passing blockIf blocks; wakeIf rules combine by \"combine\" (all | any); \"whenUnsure\" (block | wake) decides the band between unsureFrom and the limit, except that a channel message never wakes on an unsure answer. A limit counts per channel and rule, a local day from midnight on the bot’s computer; limits count on your own Slack app and for automation events.",
           "preview": "Request preview",
           "previewInvalid": "Fix the JSON to see the request.",
           "dialogHelp": "Changes here are the same text as in the card.",
           "example": {
             "default": "Default: skip replies not meant for the bot",
             "smallTalk": "Block small talk",
-            "topic": "Topic and urgency"
+            "topic": "Topic and urgency",
+            "channel": "Channel messages: only what asks the bot",
+            "banter": "Channel messages, and casual chat a few times a day"
           },
           "issue": {
             "syntax": "This is not valid JSON.",
@@ -28091,11 +28094,39 @@
             "unsureSide": "unsureFrom must be below atLeast, or above atMost.",
             "unsureChoice": "unsureFrom works only with atLeast or atMost.",
             "unused": "No rule uses “{{question}}”.",
-            "enum": "Must be one of: {{allowed}}."
+            "enum": "Must be one of: {{allowed}}.",
+            "limitOnBlock": "Only a wakeIf rule can have a limit.",
+            "limitNeedsAny": "With a limit and several wakeIf rules, set \"combine\": \"any\".",
+            "limitQuestionShared": "Another wakeIf rule also uses “{{question}}”; a limited rule needs its own question."
           },
           "line": "Line {{line}}",
-          "helpMentions": "The default rules suit replies in a thread; mentions wake without a check. A message Orca Cloud can’t tell from a reply (the first one in a thread the bot has no chat in) is checked only when both mentions and replies are. If you check mentions, a very short one can read as not meant for the bot."
-        }
+          "helpMentions": "The default rules suit replies in a thread; mentions wake without a check. A message Orca Cloud can’t tell from a reply (the first one in a thread the bot has no chat in) is checked only when both mentions and replies are. If you check mentions, a very short one can read as not meant for the bot.",
+          "previewChannel": "Preview a channel message"
+        },
+        "hostTooOldNewer": "Update Orca on this bot’s computer to use channel messages, rules scripts, notes or limits.",
+        "restored": "Gate settings restored.",
+        "channel": {
+          "rulesSwitched": "Rules switched to the default for thread replies and channel messages.",
+          "ids": "Channels to check",
+          "idsInvalid": "Enter one to {{max}} channel ids (they start with C or G), separated by commas.",
+          "idsHelp": "In Slack, open the channel’s name, then copy the Channel ID at the bottom. Invite the bot to the channel too.",
+          "notice": "Every message people who can ask post in these channels is sent to OpenAI (or your command) to decide, one request per message. If the check fails or is unsure, a channel message never wakes the bot.",
+          "noCase": "These rules don’t tell channel messages apart from thread replies (send “case”). Insert the “Channel messages” example to start from rules that do."
+        },
+        "standIn": "An older Orca saved these rules without its newer settings; until they are back, the check blocks every message it checks.",
+        "rulesCommand": "Rules from a script (optional)",
+        "rulesCommandHelp": "Gets each message as JSON on stdin and prints the rules to ask OpenAI, or decides itself. It never gets the key. Keep it outside the bot’s folders: the bot’s agent runs as the same user and could change it.",
+        "rulesCommandRemote": "Set in Orca on {{computer}}: a script runs there, so only that computer chooses it.",
+        "rulesCommandFailed": "Last run {{at}}: failed ({{error}}).",
+        "rulesCommandRan": "Last run {{at}}: {{outcome}}.",
+        "rulesCommandAsked": "asked OpenAI",
+        "rulesCommandSaved": "used the saved rules",
+        "rulesCommandDecided": "decided itself",
+        "limitsHeld": "The wake counts file could not be read: limited rules wake nothing until {{at}}.",
+        "copyNotKept": "Orca could not keep a copy of these settings for older Orca versions: if one saves this bot, Restore can’t bring them back.",
+        "limitsHeldReplacing": "The wake counts file could not be read: limited rules wake nothing until it is replaced.",
+        "failsClosed": "With a rules script or limits, a check that fails never wakes the bot, whatever “If the check fails” says.",
+        "restore": "Restore settings an older Orca dropped"
       }
     },
     "whoCanAsk": {

@@ -345,7 +345,8 @@ const TYPECHECK_INPUTS = [
       'src/cli/',
       'src/wsl-guest/',
       'config/',
-      'fork/gate-tune/'
+      'fork/gate-tune/',
+      'fork/gate-rules-script/'
     ]
   },
   {

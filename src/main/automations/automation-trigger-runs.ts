@@ -89,6 +89,8 @@ export type EventStartGate = {
     | { skipped: Pick<AutomationRun, 'error' | 'precheckResult'> }
   >
   created(run: AutomationRun): void
+  /** The run the reservation was for couldn't be created: nothing will start. */
+  failed?(): void
   /** The event's delivery ran out of time: checked before anything is written. */
   expired?(): boolean
 }
@@ -170,13 +172,21 @@ async function admitEvent(
   if (reserved && !('event' in reserved)) {
     return null
   }
-  const run = await ctx.runs.createRun(
-    automation,
-    scheduledFor,
-    'event',
-    reserved?.event ?? event,
-    reserved?.runId
-  )
+  let run: AutomationRun
+  try {
+    run = await ctx.runs.createRun(
+      automation,
+      scheduledFor,
+      'event',
+      reserved?.event ?? event,
+      reserved?.runId
+    )
+  } catch (error) {
+    if (reserved) {
+      gate?.failed?.()
+    }
+    throw error
+  }
   if (reserved) {
     gate?.created(run)
   }

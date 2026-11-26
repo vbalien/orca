@@ -31,14 +31,15 @@ export function slackLocalReads(fetchImpl: SlackFetch, botToken: string, signal:
   return {
     thread: async (
       channelId: string,
-      threadTs: string
+      threadTs: string,
+      readSignal?: AbortSignal
     ): Promise<{ messages: LocalSlackThreadMessage[]; complete: boolean }> => {
       const answer = await callSlack(
         fetchImpl,
         'conversations.replies',
         botToken,
         { channel: channelId, ts: threadTs, limit: THREAD_READ_LIMIT },
-        signal
+        readSignal ? AbortSignal.any([signal, readSignal]) : signal
       )
       return { messages: threadMessages(answer), complete: answer.has_more !== true }
     },
@@ -76,11 +77,17 @@ export function slackLocalReads(fetchImpl: SlackFetch, botToken: string, signal:
       }
       return { messages, complete: false }
     },
-    userName: async (userId: string): Promise<string | undefined> => {
+    userName: async (userId: string, readSignal?: AbortSignal): Promise<string | undefined> => {
       if (names.has(userId)) {
         return names.get(userId)
       }
-      const { user } = await callSlack(fetchImpl, 'users.info', botToken, { user: userId }, signal)
+      const { user } = await callSlack(
+        fetchImpl,
+        'users.info',
+        botToken,
+        { user: userId },
+        readSignal ? AbortSignal.any([signal, readSignal]) : signal
+      )
       const profile = slackFields(slackFields(user).profile)
       const name = [profile.display_name, profile.real_name, slackFields(user).name].find(
         (value): value is string => typeof value === 'string' && value.trim().length > 0

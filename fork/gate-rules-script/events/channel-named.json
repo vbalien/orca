@@ -1,0 +1,9 @@
+{
+  "eventId": "try-2",
+  "case": "channel_message",
+  "teamId": "T0",
+  "channelId": "C0000000001",
+  "placeKind": "public_channel",
+  "from": { "userId": "U0", "role": "member" },
+  "text": "mybot, can you tell Owner the meeting moved to 3?"
+}

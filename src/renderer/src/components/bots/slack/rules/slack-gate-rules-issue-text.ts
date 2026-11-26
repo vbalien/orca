@@ -117,6 +117,19 @@ function what(t: Translate, issue: SlackGateRulesTextIssue): string {
       return t('bots.slack.gate.rules.issue.unused', 'No rule uses “{{question}}”.', p)
     case 'enum':
       return t('bots.slack.gate.rules.issue.enum', 'Must be one of: {{allowed}}.', p)
+    case 'limit_on_block':
+      return t('bots.slack.gate.rules.issue.limitOnBlock', 'Only a wakeIf rule can have a limit.')
+    case 'limit_needs_any':
+      return t(
+        'bots.slack.gate.rules.issue.limitNeedsAny',
+        'With a limit and several wakeIf rules, set "combine": "any".'
+      )
+    case 'limit_question_shared':
+      return t(
+        'bots.slack.gate.rules.issue.limitQuestionShared',
+        'Another wakeIf rule also uses “{{question}}”; a limited rule needs its own question.',
+        p
+      )
   }
 }
 

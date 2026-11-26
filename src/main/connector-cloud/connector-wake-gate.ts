@@ -5,15 +5,25 @@ import type { ConnectorDelivery } from '../../shared/connectors/connector-cloud-
 import type { AutomationRunEvent } from '../../shared/automation-event-triggers'
 import type { Bot } from '../../shared/bot-types'
 import { slackGateApplies, type SlackGateEvent } from '../../shared/bots/bot-slack-gate'
-import type { AutomationPrecheckResult } from '../../shared/automations/history/automation-run'
 import type { EventStartGate } from '../automations/automation-trigger-runs'
-import { decideSlackWake, type SlackWakeDecision } from '../bots/slack-gate/slack-gate'
+import type { AutomationRun } from '../../shared/automations/history/automation-run'
+import {
+  decideSlackWake,
+  slackGateWakeCounts,
+  type SlackWakeDecision
+} from '../bots/slack-gate/slack-gate'
+import {
+  holdSlackGateRun,
+  slackGateReasonNote,
+  takeSlackGateRun
+} from '../bots/slack-gate/slack-gate-runs'
+import type { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
+import type { ConversationAdmission } from '../external-conversations/external-conversation-host'
 import { refusalOf } from '../external-conversations/external-conversation-chain'
 import {
   refused,
   type ConversationKey
 } from '../external-conversations/external-conversation-types'
-import type { ConversationAdmission } from '../external-conversations/external-conversation-host'
 import {
   slackGateCaseOf,
   slackGateEventOf,
@@ -23,6 +33,7 @@ import {
   type StartOrSend
 } from './connector-wake-gate-event'
 import { placeLaunchTarget } from './connector-places'
+import { precheckResult, settleTriggerCounts } from './connector-wake-gate-trigger-counts'
 
 type Send = Extract<ConnectorDelivery, { kind: 'send' }>
 type Trigger = Extract<ConnectorDelivery, { kind: 'trigger' }>
@@ -41,30 +52,21 @@ export type ConnectorWakeGateDeps = {
   heldStart: (key: ConversationKey) => boolean
   decide?: typeof decideSlackWake
   now?: () => number
+  /** Automation runs by automation, for settling a limited rule's count by what its run did. */
+  runsOf?: (automationIds: readonly string[]) => Map<string, readonly AutomationRun[]>
+  counts?: SlackGateWakeCounts
+}
+
+/** A start or send's wake gate admission, with what it found: the reason it lets the message go on,
+ *  and `settled` to keep or give back a limited rule's count by how the delivery went. */
+export type GatedAdmission = ConversationAdmission & {
+  note: () => string | undefined
+  /** `outcome`: the delivery's, or 'threw'. */
+  settled: (outcome: string) => void
 }
 
 function caseKey(entry: GateCase): string {
   return `${entry.case}:${entry.mentionUnknown ? '?' : ''}`
-}
-
-function precheckResult(
-  decision: SlackWakeDecision,
-  kind: string,
-  at: number
-): AutomationPrecheckResult {
-  return {
-    command: `Slack wake gate (${kind})`,
-    exitCode: decision.exitCode ?? null,
-    timedOut: decision.timedOut === true,
-    durationMs: decision.durationMs,
-    stdout: '',
-    stderr: '',
-    stdoutTruncated: false,
-    stderrTruncated: false,
-    error: decision.error ?? null,
-    startedAt: at,
-    completedAt: at + decision.durationMs
-  }
 }
 
 export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
@@ -95,7 +97,7 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
     delivery: StartOrSend,
     later: readonly Send[],
     deadlineAt: number
-  ): ConversationAdmission | undefined {
+  ): GatedAdmission | undefined {
     if (delivery.conversation.source !== 'slack' || (delivery.kind === 'send' && delivery.resume)) {
       return undefined
     }
@@ -106,7 +108,12 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
     if (snapshot !== 'unknown' && !(snapshot && slackGateApplies(snapshot, event))) {
       return undefined
     }
-    return async (signal, link) => {
+    let passed: {
+      reason?: SlackWakeDecision['wakeReason']
+      reservation?: SlackWakeDecision['reservation']
+      at: number
+    } | null = null
+    const admission = async (signal: AbortSignal, link: { botId?: string } | null) => {
       if (delivery.kind === 'send' && link === null) {
         // Server behavior not verified: the contract says the cloud then frees the thread and
         // starts a new chat, whose start this gate decides again.
@@ -127,13 +134,45 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
       }
       const decision = await decide(settings, event, { signal, deadlineAt })
       if (signal.aborted) {
+        decision.reservation?.release()
         return refused(refusalOf(signal))
       }
       if (decision.reason === 'expired' || now() >= deadlineAt) {
+        decision.reservation?.release()
         return refused('delivery_expired')
       }
-      return decision.verdict === 'wake' ? null : { outcome: 'accepted', held: true }
+      if (decision.verdict !== 'wake') {
+        decision.reservation?.release()
+        return { outcome: 'accepted' as const, held: true as const }
+      }
+      // Let through: from here a limited rule's count waits on the delivery's result.
+      const at = now()
+      // Its count waited past its time: too late to deliver.
+      if (decision.reservation && !decision.reservation.admit(at)) {
+        return refused('delivery_expired')
+      }
+      passed = {
+        at,
+        ...(decision.wakeReason ? { reason: decision.wakeReason } : {}),
+        ...(decision.reservation ? { reservation: decision.reservation } : {})
+      }
+      return null
     }
+    return Object.assign(admission, {
+      note: () => (passed?.reason ? slackGateReasonNote(passed.reason) : undefined),
+      settled: (outcome: string) => {
+        const reservation = passed?.reservation
+        if (!reservation || !passed) {
+          return
+        }
+        // Thrown or unknown after the gate let it through: it may have woken the bot, so it counts.
+        if (outcome === 'accepted' || outcome === 'unknown' || outcome === 'threw') {
+          reservation.commit(passed.at)
+        } else {
+          reservation.release()
+        }
+      }
+    })
   }
 
   /** Whether `next` must not ride `head`'s turn: a gate could judge their cases apart. */
@@ -202,34 +241,65 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
       },
       ...(budget.cut ? { truncated: true as const } : {})
     }
+    let reservation: SlackWakeDecision['reservation']
+    let heldRun: string | undefined
     return {
       expired,
-      created: () => {},
+      created: (run) => {
+        if (reservation) {
+          reservation.creating = false
+        }
+        void run
+      },
+      // No run was made: its reason and count go (the count back).
+      failed: () => {
+        if (heldRun) {
+          takeSlackGateRun(heldRun).notStarted()
+        }
+        reservation?.release()
+      },
       reserve: async () => {
         if (expired()) {
           return { refused: true }
         }
-        const startedAt = now()
-        const decision = await decide(
-          bot,
-          gateEvent,
-          deadlineAt === undefined ? {} : { deadlineAt }
+        await settleTriggerCounts(
+          { runsOf: deps.runsOf, counts: deps.counts ?? slackGateWakeCounts, now },
+          bot
         )
+        const startedAt = now()
+        const runId = randomUUID()
+        const decision = await decide(bot, gateEvent, {
+          ...(deadlineAt === undefined ? {} : { deadlineAt }),
+          run: { automationId: delivery.automationId, runId }
+        })
         if (decision.reason === 'expired' || decision.reason === 'cancelled' || expired()) {
+          decision.reservation?.release()
           if (decision.reason !== 'cancelled') {
             onExpired()
           }
           return { refused: true }
         }
         if (decision.verdict === 'wake') {
-          return { event, runId: randomUUID() }
+          reservation = decision.reservation
+          // The reason (rules' or script's, either may quote the message) lives in memory until the
+          // run's prompt is made, never in its record.
+          const reason = decision.wakeReason
+          heldRun = runId
+          holdSlackGateRun(runId, {
+            automationId: delivery.automationId,
+            ...(reason ? { note: slackGateReasonNote(reason) } : {}),
+            ...(reservation ? { reservation } : {})
+          })
+          return { event, runId }
         }
         return {
           skipped: {
             error:
               decision.reason === 'error'
                 ? `Slack wake gate failed and blocked this event: ${decision.error ?? 'error'}`
-                : 'Slack wake gate blocked this event.',
+                : decision.reason === 'rate_limited'
+                  ? 'Slack wake gate held this event (rate limit).'
+                  : 'Slack wake gate blocked this event.',
             precheckResult: precheckResult(decision, bot.slackGate?.kind ?? 'gate', startedAt)
           }
         }

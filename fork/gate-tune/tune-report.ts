@@ -80,10 +80,12 @@ export function report(
       console.log(`  should ${label} (${shown.length}): ${shown.join(' ')}`)
     }
   }
+  const caseOf = new Map(cases.map((entry) => [entry.id, entry.event.case ?? 'thread_reply']))
+  // The app's own verdict for each case: a channel message never wakes on an unsure answer.
   const evaluate = (candidate: SlackGateRulesConfig) => {
     const outcomes = answered.map((result) => ({
       result,
-      wake: decideSlackGateRules(candidate, result.read ?? {}).wake
+      wake: decideSlackGateRules(candidate, result.read ?? {}, { case: caseOf.get(result.id) }).wake
     }))
     return {
       misses: outcomes.filter((o) => o.result.expect === 'wake' && !o.wake).map((o) => o.result.id),

@@ -17,3 +17,14 @@ export const SLACK_GATE_SAMPLE_EVENT: SlackGateEvent = {
     { kind: 'self', text: 'Should I roll back to the last release?' }
   ]
 }
+
+/** The same preview for a channel message no one addressed to the bot (own Slack app). */
+export const SLACK_GATE_SAMPLE_CHANNEL_EVENT: SlackGateEvent = {
+  eventId: 'preview-channel',
+  case: 'channel_message',
+  teamId: 'T0',
+  channelId: 'C0',
+  placeKind: 'public_channel',
+  from: { userId: 'U0', name: 'Dana', role: 'member' },
+  text: 'Does anyone know where the release checklist is?'
+}

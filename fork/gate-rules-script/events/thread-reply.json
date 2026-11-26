@@ -1,0 +1,10 @@
+{
+  "eventId": "try-3",
+  "case": "thread_reply",
+  "teamId": "T0",
+  "channelId": "C0000000001",
+  "placeKind": "public_channel",
+  "from": { "userId": "U0", "role": "owner" },
+  "text": "Yes, please do that.",
+  "context": [{ "kind": "self", "text": "Should I roll back to the last release?" }]
+}

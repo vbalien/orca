@@ -1,6 +1,10 @@
 // The gate config's rules: each names a question and one condition of its type, with an optional unsure band.
 import {
+  isOneLineText,
   isPlainObject,
+  SLACK_GATE_LIMIT_MAX_COOLDOWN_MINUTES,
+  SLACK_GATE_LIMIT_MAX_PER_DAY,
+  SLACK_GATE_NOTE_MAX,
   type SlackGateQuestion,
   type SlackGateRulesPath
 } from './slack-gate-rules-config'
@@ -82,7 +86,7 @@ export function validateRule(
     issues.add(path, 'not_object')
     return null
   }
-  onlyKeys(issues, rule, path, ['question', 'wakeIf', 'blockIf', 'unsureFrom'])
+  onlyKeys(issues, rule, path, ['question', 'wakeIf', 'blockIf', 'unsureFrom', 'note', 'limit'])
   const name = rule.question
   if (typeof name !== 'string') {
     issues.add([...path, 'question'], name === undefined ? 'required' : 'not_string')
@@ -117,5 +121,44 @@ export function validateRule(
       }
     }
   }
+  if (rule.note !== undefined && !isOneLineText(rule.note, SLACK_GATE_NOTE_MAX)) {
+    issues.add([...path, 'note'], typeof rule.note === 'string' ? 'too_long' : 'not_string', {
+      max: SLACK_GATE_NOTE_MAX
+    })
+  }
+  if (rule.limit !== undefined) {
+    validateLimit(issues, rule.limit, [...path, 'limit'])
+    if (effect === 'blockIf') {
+      issues.add([...path, 'limit'], 'limit_on_block')
+    }
+  }
   return typeof name === 'string' ? name : null
+}
+
+function validateLimit(issues: Issues, limit: unknown, path: SlackGateRulesPath): void {
+  if (!isPlainObject(limit)) {
+    issues.add(path, 'not_object')
+    return
+  }
+  onlyKeys(issues, limit, path, ['perDay', 'cooldownMinutes', 'chance'])
+  if (Object.keys(limit).length === 0) {
+    issues.add(path, 'required')
+  }
+  for (const [key, max] of [
+    ['perDay', SLACK_GATE_LIMIT_MAX_PER_DAY],
+    ['cooldownMinutes', SLACK_GATE_LIMIT_MAX_COOLDOWN_MINUTES]
+  ] as const) {
+    const value = limit[key]
+    if (value !== undefined && finiteNumber(issues, value, [...path, key])) {
+      if (!Number.isInteger(value) || value < 1 || value > max) {
+        issues.add([...path, key], 'out_of_range', { min: 1, max })
+      }
+    }
+  }
+  const chance = limit.chance
+  if (chance !== undefined && finiteNumber(issues, chance, [...path, 'chance'])) {
+    if (chance <= 0 || chance > 1) {
+      issues.add([...path, 'chance'], 'out_of_range', { min: 0, max: 1 })
+    }
+  }
 }

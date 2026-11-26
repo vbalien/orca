@@ -23,6 +23,8 @@ import { captureAutomationRunMessage } from './automation-run-message-capture'
 import type { BotRunFields } from '../bots/bot-chat-session'
 import type { AgentJournalAutomationRunNotStartedItem } from '../../shared/agent-journal-orca-card-items'
 import { BotSessionRefusedError } from '../bots/bot-session-refused-error'
+import { slackGateApplies } from '../../shared/bots/bot-slack-gate'
+import { SLACK_CHANNEL_MESSAGE_NOTE, takeSlackGateRun } from '../bots/slack-gate/slack-gate-runs'
 
 /** Where a bot run's prompt goes; each resolves to the structured session and message that took it. */
 export type BotAutomationSessions = {
@@ -160,6 +162,25 @@ export function missedItsThread(
   return resultsTo === 'none' && automation.bot?.resultsTo === 'thread' && run.trigger === 'event'
 }
 
+/** What a run's prompt says of the Slack wake gate: that a channel message (`slack.message`) wasn't
+ *  addressed to the bot, when its gate checks automation events, and the gate's reason. */
+function slackGateRunNote(
+  run: AutomationRun,
+  bot: Pick<Bot, 'slackGate'>,
+  reason: string | undefined
+): string | undefined {
+  const channelMessage =
+    run.trigger === 'event' &&
+    run.event?.source === 'slack' &&
+    run.event.event === 'message' &&
+    slackGateApplies(bot, { case: 'trigger' })
+  const parts = [
+    channelMessage ? `[Orca: ${SLACK_CHANNEL_MESSAGE_NOTE}]` : null,
+    reason ?? null
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.join('\n') : undefined
+}
+
 /** The run completes when the turn its prompt started ends, after its result is delivered. */
 export function createBotAutomationDispatcher(
   sessions: BotAutomationSessions,
@@ -169,6 +190,8 @@ export function createBotAutomationDispatcher(
   return async ({ automation, run, target }) => {
     const turns = await results.watch()
     const asker = run.event ? automationEventAsker(run.event, target.bot.members) : null
+    // The Slack wake gate that let this run's event through: what to tell the bot, and its count.
+    const gate = takeSlackGateRun(run.id)
     const text =
       automation.once?.by !== undefined && run.trigger === 'scheduled'
         ? automationDeadlinePrompt(
@@ -176,7 +199,12 @@ export function createBotAutomationDispatcher(
             automation.once.by,
             Boolean(automation.on?.length)
           )
-        : automationRunPrompt(automation.prompt, run.event, asker)
+        : automationRunPrompt(
+            automation.prompt,
+            run.event,
+            asker,
+            slackGateRunNote(run, target.bot, gate.note)
+          )
     const automationRun = captureAutomationRunMessage(automation, run, text, asker)
     const fields: BotRunFields = {
       memorySource: automationRunMemoryLabel(automation.name, run.event),
@@ -187,8 +215,15 @@ export function createBotAutomationDispatcher(
     const { runsIn } = target
     const chosenChat = automation.bot?.chat?.sessionId
     const saved = automation.bot?.resultsTo ?? 'chat'
-    const route: ThreadRoute =
-      saved === 'thread' ? await threadRoute(threads, run, runsIn) : { kind: 'take' }
+    let route: ThreadRoute
+    try {
+      route = saved === 'thread' ? await threadRoute(threads, run, runsIn) : { kind: 'take' }
+    } catch (error) {
+      // Nothing reached a chat: the gate's count goes back.
+      gate.notStarted()
+      turns.dispose()
+      throw error
+    }
     // A new conversation that never opened has no chat to show why: the bot's Chat does.
     const destination: BotRunChat =
       route.kind === 'owner'
@@ -221,7 +256,9 @@ export function createBotAutomationDispatcher(
                     ...(run.triggeredBy ? { triggeredBy: run.triggeredBy } : {})
                   }
                 })
+      gate.started()
     } catch (error) {
+      gate.notStarted()
       turns.dispose()
       results.couldNotStart(
         target.bot,

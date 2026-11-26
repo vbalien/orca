@@ -3,6 +3,7 @@
 import type { Bot } from '../../shared/bot-types'
 import { runtimeConversationHost } from '../external-conversations/external-conversation-runtime-host'
 import { SlackLocalInbound } from './slack-local-inbound'
+import type { SlackLocalParticipation } from './slack-local-participation'
 import { slackLocalReads } from './slack-local-reads'
 import { localSlackWakeGate, type LocalSlackWakeGate } from './slack-local-wake-gate'
 import type { SlackLocalSecrets } from './slack-local-token-store'
@@ -31,6 +32,7 @@ export function slackLocalConnection(input: {
   onState: (state: SocketModeState) => void
   wakeGate?: LocalSlackWakeGate
   socketFactory?: (url: string) => SocketModeSocket
+  participation?: SlackLocalParticipation
 }): SlackLocalRunning {
   const { secrets, runtime } = input
   const abort = new AbortController()
@@ -42,7 +44,8 @@ export function slackLocalConnection(input: {
     host: () => runtimeConversationHost(runtime),
     reads: slackLocalReads(input.fetch, secrets.botToken, abort.signal),
     wakeGate: input.wakeGate ?? localSlackWakeGate(),
-    signal: abort.signal
+    signal: abort.signal,
+    ...(input.participation ? { participation: input.participation } : {})
   })
   const client = new SlackSocketModeClient({
     appToken: secrets.appToken,

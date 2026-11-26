@@ -8,6 +8,7 @@ import { outcomeSentence } from '../connector-cloud/connector-reply-outcome-sent
 import { BoundedKeys } from './slack-local-bounded-keys'
 import { callSlack, SlackApiError, type SlackFetch } from './slack-web-api'
 import type { LocalSlackIdentity } from './slack-local-events'
+import type { SlackLocalParticipation } from './slack-local-participation'
 
 // Slack's limit for markdown_text in one message.
 const PART_CHARS = 12_000
@@ -32,6 +33,11 @@ export type SlackLocalRepliesDeps = {
   onDelivered?: () => void
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   now?: () => number
+  /** Which channel-message threads (`:c`) the bot joined: before it has, their notices stay off Slack. */
+  participation?: SlackLocalParticipation
+  /** Whether a conversation is still its thread's chat for this bot; checked before every post. */
+  /** Whether this chat (its pane) still holds the thread, right before each post. */
+  canPost?: (externalId: string, paneKey: string) => boolean
 }
 
 const sleepFor = (ms: number, signal: AbortSignal): Promise<void> => wait(ms, undefined, { signal })
@@ -82,17 +88,38 @@ export class SlackLocalReplies {
     if (!text || !this.done.add(key)) {
       return
     }
-    await this.post(event.conversation.externalId, splitAnswer(text))
+    // Words are an answer and go; a failure line is a notice (see `notice`) — and so are the words of a
+    // failed turn in a thread a channel message opened (an agent's API error is said in words).
+    const notice =
+      !words || (failed && parseLocalSlackConversation(event.conversation.externalId)?.channel)
+    await (notice
+      ? this.notice(event.conversation.externalId, event.paneKey, [text])
+      : this.post(event.conversation.externalId, event.paneKey, splitAnswer(text)))
   }
 
   private async prompt(event: Prompt): Promise<void> {
     if (!this.notices.add(`${event.conversation.externalId}:${event.prompt.promptId}`)) {
       return
     }
-    await this.post(event.conversation.externalId, [PROMPT_NOTICE])
+    await this.notice(event.conversation.externalId, event.paneKey, [PROMPT_NOTICE])
   }
 
-  private async post(externalId: string, parts: string[]): Promise<void> {
+  /** A failure line or "needs an answer in Orca": in a thread a channel message opened, only once the
+   *  bot joined it (an @mention on its way decides), so a look it was never asked for leaves no trace. */
+  private async notice(externalId: string, paneKey: string, parts: string[]): Promise<void> {
+    const participation = this.deps.participation
+    const place = parseLocalSlackConversation(externalId)
+    if (!place?.channel || !participation) {
+      return place?.channel ? undefined : this.post(externalId, paneKey, parts)
+    }
+    await participation.load()
+    if (participation.has(externalId)) {
+      return this.post(externalId, paneKey, parts)
+    }
+    participation.deferWhileMention(externalId, () => void this.post(externalId, paneKey, parts))
+  }
+
+  private async post(externalId: string, paneKey: string, parts: string[]): Promise<void> {
     const place = parseLocalSlackConversation(externalId)
     if (!place || this.pending >= MAX_PENDING) {
       this.deps.onError(place ? 'reply_dropped' : 'reply_unplaceable')
@@ -103,8 +130,12 @@ export class SlackLocalReplies {
     const run = this.tail.then(async () => {
       try {
         for (const part of parts) {
-          if (!(await this.postPart(place, part))) {
+          if (!(await this.postPart(place, part, externalId, paneKey))) {
             return
+          }
+          // The bot has now spoken in the thread: a channel-message thread is joined.
+          if (place.channel) {
+            this.deps.participation?.add(externalId)
           }
         }
         this.deps.onDelivered?.()
@@ -119,7 +150,9 @@ export class SlackLocalReplies {
   /** False once the answer can go no further (an error was reported). */
   private async postPart(
     place: NonNullable<ReturnType<typeof parseLocalSlackConversation>>,
-    text: string
+    text: string,
+    externalId: string,
+    paneKey: string
   ): Promise<boolean> {
     // markdown_text where Slack takes it; plain text once if it refuses the field.
     let field: 'markdown_text' | 'text' = 'markdown_text'
@@ -134,6 +167,12 @@ export class SlackLocalReplies {
       }
       if (!current) {
         this.deps.onError('not_connected')
+        return false
+      }
+      // A chat that is no longer its thread's (its link went, or an ordinary chat took the thread) posts
+      // nothing more, even mid-retry.
+      if (this.deps.canPost && !this.deps.canPost(externalId, paneKey)) {
+        console.warn('[slack-local] dropped an answer: its chat is no longer the thread’s')
         return false
       }
       // Only the app that was asked answers: new credentials for another app post nothing old.

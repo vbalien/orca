@@ -18,7 +18,7 @@ const envelope = (event: Record<string, unknown>, extra: Record<string, unknown>
   ...extra
 })
 
-it('reads mentions, DMs and thread replies, and nothing else', () => {
+it('reads mentions, DMs, thread replies and top-level channel messages, and nothing else', () => {
   const read = (event: Record<string, unknown>, extra?: Record<string, unknown>) =>
     readLocalSlackEvent(envelope(event, extra), identity)
   expect(read({ type: 'app_mention', text: '<@U0BOT> fix the build' })).toMatchObject({
@@ -34,9 +34,17 @@ it('reads mentions, DMs and thread replies, and nothing else', () => {
   expect(
     read({ type: 'message', channel_type: 'channel', thread_ts: '1800000000.000100', text: 'ok' })
   ).toMatchObject({ case: 'thread_reply', threadTs: '1800000000.000100', inThread: true })
-  // Not ours: a top-level channel message, the app's own post, another bot, an edit, a group DM,
-  // another workspace or app.
-  expect(read({ type: 'message', channel_type: 'channel', text: 'x' })).toBeNull()
+  // A top-level message is a channel message (the inbound takes it only where the gate checks them).
+  expect(read({ type: 'message', channel_type: 'channel', text: 'x' })).toMatchObject({
+    case: 'channel_message',
+    inThread: false
+  })
+  // Not ours: the app's own post, another bot, an edit, a delete, a join, a group DM, another
+  // workspace or app.
+  expect(
+    read({ type: 'message', channel_type: 'channel', subtype: 'channel_join', text: 'x' })
+  ).toBeNull()
+  expect(read({ type: 'message', channel_type: 'channel', subtype: 'message_deleted' })).toBeNull()
   expect(read({ type: 'app_mention', user: 'U0BOT', text: 'x' })).toBeNull()
   expect(read({ type: 'app_mention', bot_id: 'B1', text: 'x' })).toBeNull()
   expect(read({ type: 'message', channel_type: 'im', subtype: 'message_changed' })).toBeNull()
@@ -45,7 +53,10 @@ it('reads mentions, DMs and thread replies, and nothing else', () => {
   expect(read({ type: 'app_mention', text: 'x' }, { api_app_id: 'A2' })).toBeNull()
 })
 
-function harness(gate: LocalSlackWakeGate = async () => 'wake', linkedToBot: string | null = null) {
+function harness(
+  gate: LocalSlackWakeGate = async () => ({ verdict: 'wake' }),
+  linkedToBot: string | null = null
+) {
   const calls: { kind: 'start' | 'send'; text: string; role?: string }[] = []
   const admissible: (() => boolean)[] = []
   const bot: { members: unknown[] } & Record<string, unknown> = {
@@ -56,8 +67,9 @@ function harness(gate: LocalSlackWakeGate = async () => 'wake', linkedToBot: str
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the calls this path makes.
   const seam = {
-    linkedChat: (_key: unknown, botId?: string) =>
-      linkedToBot && (!botId || botId === linkedToBot)
+    // An ordinary chat only: no channel-message chat (`:c`) in these threads.
+    linkedChat: (key: { externalId: string }, botId?: string) =>
+      linkedToBot && !key.externalId.endsWith(':c') && (!botId || botId === linkedToBot)
         ? { worktreeId: 'wt', sessionId: 's' }
         : null,
     start: async (
@@ -112,7 +124,7 @@ it('admits only Who can ask, once per message, and nothing the gate blocks', asy
     { kind: 'start', text: 'yo', role: 'member' }
   ])
 
-  const blocked = harness(async () => 'block')
+  const blocked = harness(async () => ({ verdict: 'block' }))
   blocked.inbound.receive(envelope({ type: 'app_mention', text: '<@U0BOT> hello' }))
   const failing = harness(async () => {
     throw new Error('gate down')
@@ -141,12 +153,12 @@ it('continues its own thread, and leaves another bot’s or an unasked thread al
 })
 
 it('drops a request whose asker lost access while the gate decided', async () => {
-  let release: (verdict: 'wake') => void = () => {}
+  let release: (verdict: { verdict: 'wake' }) => void = () => {}
   const h = harness(() => new Promise((resolve) => (release = resolve)))
   h.inbound.receive(envelope({ type: 'app_mention', user: 'U0MEMBER', text: '<@U0BOT> deploy' }))
   await settled()
   h.revoke()
-  release('wake')
+  release({ verdict: 'wake' })
   await settled()
   expect(h.calls).toEqual([])
 })
@@ -163,7 +175,7 @@ it('asks again when the chat takes it, and wakes once for a mention however its 
   const cases: string[] = []
   const linked = harness(async (_bot, event) => {
     cases.push(event.case)
-    return event.case === 'mention' ? 'wake' : 'block'
+    return { verdict: event.case === 'mention' ? 'wake' : 'block' }
   }, 'b1')
   const thread = { channel_type: 'channel', thread_ts: '1800000000.000100', text: '<@U0BOT> again' }
   linked.inbound.receive(envelope({ type: 'message', ...thread }))

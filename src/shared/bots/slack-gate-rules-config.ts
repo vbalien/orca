@@ -56,12 +56,23 @@ export type SlackGateCondition =
   | { atMost: number }
   | { oneOf: SlackGateChoiceValue[] }
 
+/** How often a wake rule may wake the bot, counted per channel and rule (its question): at most
+ *  `perDay` times a local day, `cooldownMinutes` apart, and only `chance` of the times it passes. */
+export type SlackGateLimit = { perDay?: number; cooldownMinutes?: number; chance?: number }
+
 export type SlackGateRule = {
   question: string
   wakeIf?: SlackGateCondition
   blockIf?: SlackGateCondition
   unsureFrom?: number
+  /** Why this rule wakes the bot, in a few words; the bot is told it. */
+  note?: string
+  limit?: SlackGateLimit
 }
+
+export const SLACK_GATE_NOTE_MAX = 200
+export const SLACK_GATE_LIMIT_MAX_PER_DAY = 1000
+export const SLACK_GATE_LIMIT_MAX_COOLDOWN_MINUTES = 10_080
 
 export type SlackGateRulesConfig = {
   model?: string
@@ -105,7 +116,10 @@ export const SLACK_GATE_RULES_ISSUE_CODES = [
   'unsure_side',
   'unsure_choice',
   'unused_question',
-  'enum'
+  'enum',
+  'limit_on_block',
+  'limit_needs_any',
+  'limit_question_shared'
 ] as const
 export type SlackGateRulesIssueCode = (typeof SLACK_GATE_RULES_ISSUE_CODES)[number]
 export type SlackGateRulesPath = (string | number)[]
@@ -139,6 +153,33 @@ export function canonicalSlackGateRules(config: SlackGateRulesConfig): SlackGate
 
 export function slackGateRulesBytes(config: SlackGateRulesConfig): number {
   return new TextEncoder().encode(JSON.stringify(canonicalSlackGateRules(config))).length
+}
+
+/** Whether a config uses fields older builds don't know (a rule's note or limit). */
+export function slackGateRulesExtended(config: SlackGateRulesConfig): {
+  notes: boolean
+  limits: boolean
+} {
+  return {
+    notes: config.rules.some((rule) => rule.note !== undefined),
+    limits: config.rules.some((rule) => rule.limit !== undefined)
+  }
+}
+
+/** The longest cooldown any of its rules sets, in minutes; 0 when none. */
+export function slackGateLongestCooldown(config: SlackGateRulesConfig): number {
+  return Math.max(0, ...config.rules.map((rule) => rule.limit?.cooldownMinutes ?? 0))
+}
+
+/** A one-line text without control characters, 1 to `max` characters. */
+export function isOneLineText(value: unknown, max: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    value.length <= max &&
+    // oxlint-disable-next-line no-control-regex -- control characters are what this rejects.
+    !/[\u0000-\u001f\u007f]/.test(value)
+  )
 }
 
 /** How many earlier messages a config sends: 0 when none (left out or a limit of 0), Infinity for all. */
