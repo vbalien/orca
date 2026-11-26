@@ -288,7 +288,7 @@ export type BotUpdateParams = z.infer<typeof BotUpdate>
 /** What the host itself may change: an update, the Google toggle, which only google.bot.set sets,
  *  or the host MCP list, which only bots.tools.setHostMcpServers sets. */
 export type BotHostUpdates = BotUpdateParams['updates'] &
-  Pick<Bot, 'google' | 'googleAccounts' | 'hostMcpServers' | 'slackGate'> &
+  Pick<Bot, 'google' | 'googleAccounts' | 'hostMcpServers' | 'slackGate' | 'slackGateRetired'> &
   Pick<Bot, 'acceptedOffers' | 'handedPairedWorkspaces' | 'itemsSeen'> &
   // Host-only: how its Slack connects (bots.slackLocal.* sets it).
   Pick<Bot, 'slackConnection'> & {

@@ -12,6 +12,7 @@ import { dropInferredParentsOverFolderParents } from '../workspace-lineage/folde
 import { normalizeCrossStoreLineageByChildKey } from '../../../../shared/worktree/lineage/cross-store-lineage-records'
 import { normalizePersistedBots, splitBotsByOlderBuildSupport } from '../../../../shared/bot-types'
 import { migrateRetiredBotAgent } from '../../../../shared/bots/bot-retired-agents'
+import { hasRetiredJevGate } from '../../../../shared/bots/bot-slack-gate'
 import {
   markImmutableBotSnapshot,
   orderBotsBySavedOrder
@@ -64,7 +65,8 @@ export function normalizeLoadedProfileState(
       ? undefined
       : normalizePersistedBots(savedBots)
   // Saved Gemini CLI bots load as Antigravity bots; save once so the switch is on disk.
-  if (savedBots.some((bot) => migrateRetiredBotAgent(bot) !== bot)) {
+  // A retired Jev gate is dropped on disk too, so an older build can't run it again after a rollback.
+  if (savedBots.some((bot) => migrateRetiredBotAgent(bot) !== bot || hasRetiredJevGate(bot))) {
     markNeedsSave()
   }
   const allBots =

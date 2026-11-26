@@ -43,7 +43,7 @@ function decider(runs: ReturnType<typeof heldRun>[], fields: Partial<SlackGateDe
   const deps: SlackGateDeps = {
     readKey: async () => null,
     now: Date.now,
-    askJev: async () => ({ kind: 'error', error: 'unused' }),
+    askOpenAI: async () => ({ kind: 'error', error: 'unused' }),
     runCommand: ({ signal }) => {
       started.push(signal)
       const run = runs.shift() ?? heldRun()
@@ -169,7 +169,7 @@ describe('SlackGateDecider', () => {
     const gate = new SlackGateDecider({
       readKey: async () => null,
       now: Date.now,
-      askJev: async () => ({ kind: 'error', error: 'unused' }),
+      askOpenAI: async () => ({ kind: 'error', error: 'unused' }),
       runCommand: () => {
         active += 1
         most = Math.max(most, active)
@@ -214,21 +214,24 @@ describe('SlackGateDecider', () => {
   })
 
   it('never carries a request error into the decision, which can reach automation history', async () => {
-    const jev: BotSlackGate = {
+    const openai: BotSlackGate = {
       on: true,
-      kind: 'jev',
+      kind: 'openai',
       appliesTo: ['thread_reply'],
       timeoutSeconds: 5,
       onError: 'block',
-      jev: { question: 'q', threshold: 0.5 }
+      openai: {
+        questions: [{ type: 'predicate', name: 'q', instructions: 'Q?' }],
+        rules: [{ question: 'q', wakeIf: { atLeast: 0.5 } }]
+      }
     }
     const { decider: gate } = decider([], {
       readKey: async () => 'sk-secret',
-      askJev: async () => {
+      askOpenAI: async () => {
         throw new TypeError('Invalid header value: Bearer sk-secret')
       }
     })
-    const decided = await gate.decide({ id: 'b', name: 'B', slackGate: jev }, event())
+    const decided = await gate.decide({ id: 'b', name: 'B', slackGate: openai }, event())
     expect(decided).toMatchObject({ verdict: 'block', reason: 'error' })
     expect(JSON.stringify(decided)).not.toContain('sk-secret')
   })

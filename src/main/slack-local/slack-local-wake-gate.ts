@@ -1,11 +1,14 @@
 // The Slack wake gate for a bot's own Slack app: the message as the gate reads it, and the gate's
 // decision read fail-closed. Runs after Who can ask, before any turn starts or anything is posted.
 import type { Bot } from '../../shared/bot-types'
-import type { SlackGateEvent } from '../../shared/bots/bot-slack-gate'
+import {
+  SLACK_GATE_CONTEXT_MARKER_TEXT as MARKER_TEXT,
+  slackGateContextIncomplete,
+  type SlackGateEvent
+} from '../../shared/bots/bot-slack-gate'
 import type { ConnectorAsker } from '../../shared/connector-asker-contract'
 import { decideSlackWake } from '../bots/slack-gate/slack-gate'
 import { TextBudget } from '../connector-cloud/connector-wake-gate-event'
-import { SLACK_GATE_CONTEXT_MARKER_TEXT as MARKER_TEXT } from '../../shared/bots/slack-gate-jev-request'
 import type { LocalSlackMessage } from './slack-local-events'
 
 /** Decides whether a message wakes the bot; anything but 'wake' posts nothing and starts nothing. */
@@ -17,12 +20,14 @@ export type LocalSlackWakeGate = (
 
 /** The local message as the gate reads it. `historyUnknown`: a bare mention in a thread whose
  *  earlier messages weren't read whole, so what they asked before is unknown, not nothing.
- *  `truncated`: inbound already cut a text. */
+ *  `truncated`: inbound already cut a text. `gateContext`: a running thread's messages read for an
+ *  OpenAI gate alone, in place of the asker's (empty) context; the text budget goes to the newest first. */
 export function localSlackGateEvent(input: {
   message: LocalSlackMessage
   asker: ConnectorAsker
   historyUnknown: boolean
   truncated: boolean
+  gateContext?: NonNullable<SlackGateEvent['context']>
 }): SlackGateEvent {
   const { message, asker } = input
   const budget = new TextBudget()
@@ -37,18 +42,24 @@ export function localSlackGateEvent(input: {
     : input.historyUnknown
       ? { texts: [], incomplete: true as const }
       : null
-  const context = asker.context.map((item) =>
-    'text' in item
-      ? {
+  const context = input.gateContext
+    ? input.gateContext
+        .toReversed()
+        .map((item) => ({
           kind: item.kind,
-          ...('userId' in item && item.userId ? { userId: item.userId } : {}),
-          text: budget.take(item.text)
-        }
-      : { kind: item.kind, text: budget.take(MARKER_TEXT[item.kind]) }
-  )
-  const incomplete = asker.context.find(
-    (item) => item.kind === 'unreadable' || item.kind === 'more'
-  )?.kind
+          text: budget.take(isMarker(item.kind) ? MARKER_TEXT[item.kind] : item.text)
+        }))
+        .toReversed()
+    : asker.context.map((item) =>
+        'text' in item
+          ? {
+              kind: item.kind,
+              ...('userId' in item && item.userId ? { userId: item.userId } : {}),
+              text: budget.take(item.text)
+            }
+          : { kind: item.kind, text: budget.take(MARKER_TEXT[item.kind]) }
+      )
+  const incomplete = slackGateContextIncomplete(input.gateContext ?? asker.context)
   return {
     eventId: message.eventId,
     case: message.case,
@@ -68,6 +79,9 @@ export function localSlackGateEvent(input: {
       : {})
   }
 }
+
+const isMarker = (kind: string): kind is keyof typeof MARKER_TEXT =>
+  kind === 'more' || kind === 'unreadable'
 
 function placeOf(asker: ConnectorAsker): SlackGateEvent['placeKind'] {
   const kind = asker.place.kind

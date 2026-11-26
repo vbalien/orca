@@ -1,18 +1,22 @@
-// Collecting the Jev config validator's problems, and the small checks every part of it uses.
+// Collecting the gate rules validator's problems, and the small checks every part of it uses.
 import type {
-  SlackGateJevIssue,
-  SlackGateJevIssueCode,
-  SlackGateJevPath
-} from './slack-gate-jev-config'
+  SlackGateRulesIssue,
+  SlackGateRulesIssueCode,
+  SlackGateRulesPath
+} from './slack-gate-rules-config'
 
 // Enough to fix a config by; a pasted wall of junk never costs more than this many.
 const MAX_ISSUES = 50
 
 export class Issues {
-  readonly list: SlackGateJevIssue[] = []
+  readonly list: SlackGateRulesIssue[] = []
   /** Every problem found, also past the ones kept: what tells valid from not. */
   count = 0
-  add(path: SlackGateJevPath, code: SlackGateJevIssueCode, params?: SlackGateJevIssue['params']) {
+  add(
+    path: SlackGateRulesPath,
+    code: SlackGateRulesIssueCode,
+    params?: SlackGateRulesIssue['params']
+  ) {
     this.count++
     if (this.list.length < MAX_ISSUES) {
       this.list.push({ path, code, ...(params ? { params } : {}) })
@@ -23,7 +27,7 @@ export class Issues {
 export function onlyKeys(
   issues: Issues,
   value: Record<string, unknown>,
-  path: SlackGateJevPath,
+  path: SlackGateRulesPath,
   allowed: readonly string[]
 ): void {
   for (const key of Object.keys(value)) {
@@ -33,7 +37,7 @@ export function onlyKeys(
   }
 }
 
-export function optionalString(issues: Issues, value: unknown, path: SlackGateJevPath): void {
+export function optionalString(issues: Issues, value: unknown, path: SlackGateRulesPath): void {
   if (value !== undefined && typeof value !== 'string') {
     issues.add(path, 'not_string')
   }
@@ -42,7 +46,7 @@ export function optionalString(issues: Issues, value: unknown, path: SlackGateJe
 export function finiteNumber(
   issues: Issues,
   value: unknown,
-  path: SlackGateJevPath
+  path: SlackGateRulesPath
 ): value is number {
   if (typeof value !== 'number') {
     issues.add(path, 'not_number')
@@ -53,4 +57,15 @@ export function finiteNumber(
     return false
   }
   return true
+}
+
+/** Text the field needs: present, a string, not blank. */
+export function requiredText(issues: Issues, value: unknown, path: SlackGateRulesPath): void {
+  if (value === undefined) {
+    issues.add(path, 'required')
+  } else if (typeof value !== 'string') {
+    issues.add(path, 'not_string')
+  } else if (value.trim().length === 0) {
+    issues.add(path, 'blank')
+  }
 }

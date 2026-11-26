@@ -6,11 +6,11 @@ import {
   type SlackGateEvent
 } from '../../../shared/bots/bot-slack-gate'
 import type { Bot } from '../../../shared/bot-types'
-import { readSlackGateKey } from './slack-gate-key'
+import type { SlackGateChoiceValue } from '../../../shared/bots/slack-gate-rules-config'
+import { readSlackGateKey, type SlackGateKeySlot } from './slack-gate-key'
 import { runSlackGateCommand, type SlackGateCommandRun } from './slack-gate-command'
-import { askSlackGateJev, type SlackGateJevOutcome } from './slack-gate-jev'
-import { decideSlackGateJevRules, type SlackGateJevRuleResult } from './slack-gate-jev-rules'
-import { slackGateJevConfigOf } from '../../../shared/bots/slack-gate-jev-config'
+import { askSlackGateOpenAI, type SlackGateOpenAIOutcome } from './slack-gate-openai'
+import { decideSlackGateRules, type SlackGateRuleResult } from './slack-gate-rules'
 
 export type SlackWakeDecision = {
   verdict: 'wake' | 'block'
@@ -19,18 +19,20 @@ export type SlackWakeDecision = {
   exitCode?: number | null
   timedOut?: boolean
   score?: number
-  /** Jev: each question's answer (numbers or choice names) and each rule's result. No message text. */
-  answers?: Record<string, number | string>
-  rules?: SlackGateJevRuleResult[]
+  /** OpenAI: each question's answer (numbers or choice values) and each rule's result. No message text. */
+  answers?: Record<string, number | SlackGateChoiceValue>
+  rules?: SlackGateRuleResult[]
+  /** OpenAI: the questions it declined to answer, by name (a failed check). */
+  refused?: string[]
   error?: string
 }
 
 export type SlackGateBot = Pick<Bot, 'id' | 'name' | 'slackGate'>
 
 export type SlackGateDeps = {
-  readKey: (botId: string) => Promise<string | null>
+  readKey: (botId: string, slot: SlackGateKeySlot) => Promise<string | null>
   runCommand: typeof runSlackGateCommand
-  askJev: typeof askSlackGateJev
+  askOpenAI: typeof askSlackGateOpenAI
   now: () => number
 }
 
@@ -46,19 +48,19 @@ type Outcome =
       wake: boolean
       exitCode?: number | null
       score?: number
-      answers?: Record<string, number | string>
-      rules?: SlackGateJevRuleResult[]
+      answers?: Record<string, number | SlackGateChoiceValue>
+      rules?: SlackGateRuleResult[]
     }
-  | { kind: 'error'; error: string; exitCode?: number | null; timedOut?: true }
+  | { kind: 'error'; error: string; exitCode?: number | null; timedOut?: true; refused?: string[] }
 
 class BotSlots {
   running = 0
   readonly waiting: (() => void)[] = []
 }
 
-/** A command gate's input is the event as it always was: newer fields for Jev rules stay out. */
+/** A command gate's input is the event as it always was: newer gate-only fields stay out. */
 function commandEvent(event: SlackGateEvent): Omit<SlackGateEvent, 'contextIncomplete'> {
-  const { contextIncomplete: _jevOnly, ...rest } = event
+  const { contextIncomplete: _gateOnly, ...rest } = event
   return rest
 }
 
@@ -140,7 +142,8 @@ export class SlackGateDecider {
         ...(why === 'timeout' || (outcome.kind === 'error' && outcome.timedOut)
           ? { timedOut: true }
           : {}),
-        ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {})
+        ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}),
+        ...(outcome.kind === 'error' && outcome.refused ? { refused: outcome.refused } : {})
       })
     } finally {
       timers.forEach(clearTimeout)
@@ -155,7 +158,9 @@ export class SlackGateDecider {
     signal: AbortSignal,
     timeoutAt: number
   ): Promise<{ outcome: Promise<Outcome>; released: Promise<void> }> {
-    const key = await this.deps.readKey(bot.id).catch(() => null)
+    const key = await this.deps
+      .readKey(bot.id, gate.kind === 'command' ? 'command' : 'openai')
+      .catch(() => null)
     // Stopped while the key was read: nothing launches.
     if (signal.aborted) {
       const stopped: Outcome = { kind: 'error', error: 'Stopped' }
@@ -185,17 +190,21 @@ export class SlackGateDecider {
       })
       return { outcome, released: run.released }
     }
+    const config = gate.openai
     const asked = this.deps
-      .askJev({ jev: gate.jev, bot: { name: bot.name }, event, key, signal })
+      .askOpenAI({ config, bot: { name: bot.name }, event, key, signal })
       // Never the thrown message: a malformed key can appear in a header error, and errors reach
       // automation history.
-      .catch((): SlackGateJevOutcome => ({ kind: 'error', error: 'TypeSafe request failed' }))
-    const { config } = slackGateJevConfigOf(gate.jev)
+      .catch((): SlackGateOpenAIOutcome => ({ kind: 'error', error: 'OpenAI request failed' }))
     const outcome = asked.then((result): Outcome => {
       if (result.kind === 'error') {
-        return { kind: 'error', error: result.error }
+        return {
+          kind: 'error',
+          error: result.error,
+          ...(result.refused ? { refused: result.refused } : {})
+        }
       }
-      const verdict = decideSlackGateJevRules(config, result.answers)
+      const verdict = decideSlackGateRules(config, result.answers)
       return {
         kind: 'verdict',
         wake: verdict.wake,
@@ -296,7 +305,10 @@ export class SlackGateDecider {
       ...(decision.exitCode !== undefined ? { exitCode: decision.exitCode } : {}),
       ...(decision.score !== undefined ? { score: decision.score } : {}),
       ...(decision.answers ? { answers: decision.answers } : {}),
-      ...(decision.rules ? { rules: decision.rules } : {})
+      ...(decision.rules ? { rules: decision.rules } : {}),
+      // Our own fixed sentences (status, question names), never a thrown message or a response body.
+      ...(bot.slackGate?.kind === 'openai' && decision.error ? { error: decision.error } : {}),
+      ...(decision.refused ? { refused: decision.refused } : {})
     })
     return decision
   }
@@ -305,7 +317,7 @@ export class SlackGateDecider {
 const shared = new SlackGateDecider({
   readKey: readSlackGateKey,
   runCommand: runSlackGateCommand,
-  askJev: askSlackGateJev,
+  askOpenAI: askSlackGateOpenAI,
   now: Date.now
 })
 

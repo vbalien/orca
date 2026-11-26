@@ -78,6 +78,40 @@ const AGENTS = [
 // A person on a paired computer: no agent claim.
 const PAIRED = { kind: 'paired-device' as const, deviceId: 'mac' }
 
+describe('bots.slackGate.save', () => {
+  it('saves an OpenAI gate from a paired owner, in canonical form, replacing a retired notice', async () => {
+    const openai = {
+      on: true,
+      kind: 'openai' as const,
+      appliesTo: ['thread_reply' as const],
+      timeoutSeconds: 10,
+      onError: 'wake' as const,
+      openai: {
+        model: '  ',
+        questions: [{ type: 'predicate' as const, name: 'q', instructions: 'Q?' }],
+        rules: [{ question: 'q', wakeIf: { atLeast: 0.5 } }]
+      }
+    }
+    const bot = saved()
+    bot.bot = { ...bot.bot, slackGateRetired: 'jev' }
+    await call(
+      'bots.slackGate.save',
+      { botId: 'b1', gate: openai },
+      contextFor(PAIRED, bot).context
+    )
+    expect(bot.bot.slackGate).toEqual({
+      ...openai,
+      openai: { questions: openai.openai.questions, rules: openai.openai.rules }
+    })
+    expect(bot.bot.slackGateRetired).toBeUndefined()
+    for (const caller of AGENTS) {
+      await expect(
+        call('bots.slackGate.save', { botId: 'b1', gate: null }, contextFor(caller, bot).context)
+      ).rejects.toThrow()
+    }
+  })
+})
+
 describe('bots.slackGate.set', () => {
   it('refuses every agent CLI', async () => {
     for (const caller of AGENTS) {
@@ -158,11 +192,13 @@ describe('bots.slackGate key methods', () => {
     expect(SlackGateSetKey.safeParse({ botId: 'b1', key: 'sk-1\nX-Other: y' }).success).toBe(false)
     expect(await call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)).toEqual({
       apiKeySet: true,
+      openaiKeySet: false,
       sealing: 'os-keychain'
     })
     expect(await readSlackGateKey('b1')).toBe('secret')
     expect(await call('bots.slackGate.clearKey', { botId: 'b1' }, context)).toEqual({
       apiKeySet: false,
+      openaiKeySet: false,
       sealing: 'os-keychain'
     })
     expect(await readSlackGateKey('b1')).toBeNull()

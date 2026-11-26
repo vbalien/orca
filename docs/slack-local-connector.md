@@ -118,8 +118,11 @@ Keep both private. Orca never shows them again once saved.
    error** setting says; one still undecided after 60 seconds, or cut off by the app disconnecting,
    starts nothing. It reads the message, its place, the asker's
    role, the thread context Orca read, and marks for anything left out (earlier messages not shown,
-   a thread that couldn't be read, or a bare mention whose earlier request is unknown). A TypeSafe
-   Jev check sends that text to TypeSafe.
+   a thread that couldn't be read, or a bare mention whose earlier request is unknown). An OpenAI
+   Decisions check sends that text to OpenAI. For a reply in a thread the bot already answers in, an
+   OpenAI check that sends `earlierMessages` reads the messages right before it for itself (up to 3
+   pages within 3 seconds; none while Slack asks to wait), marking the bot's own as `this_bot`; the
+   chat itself still gets only the new reply.
 
 ## 4. Try it
 

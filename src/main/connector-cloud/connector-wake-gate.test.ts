@@ -21,7 +21,8 @@ import {
   type decideSlackWake,
   type SlackWakeDecision
 } from '../bots/slack-gate/slack-gate'
-import { askSlackGateJev } from '../bots/slack-gate/slack-gate-jev'
+import { askSlackGateOpenAI } from '../bots/slack-gate/slack-gate-openai'
+import { SLACK_GATE_DEFAULT_RULES } from '../../shared/bots/slack-gate-default-rules'
 import { ConnectorDeliveryAcks } from './connector-delivery-acks'
 import { dispatchDelivery, type DispatchMachine } from './connector-deliveries'
 import { createConnectorWakeGate, type WakeGateBot } from './connector-wake-gate'
@@ -449,60 +450,133 @@ describe('acks of a held delivery', () => {
   })
 })
 
-describe('a Jev gate with rules on the cloud path', () => {
-  it('asks TypeSafe with the configured questions and state, and holds what the rules block', async () => {
-    const bodies: { state: Record<string, unknown>; questions: unknown }[] = []
-    let chat = 0.95
+describe('the default OpenAI gate on the cloud path', () => {
+  type Reply = { status?: number } & ({ probability: number } | { refusal: true })
+  function openai(onError: 'wake' | 'block' = 'wake') {
+    const bodies: {
+      input: { content: { data: Record<string, unknown> }[] }[]
+      questions: unknown
+    }[] = []
+    const replies: Reply[] = []
     const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
       bodies.push(JSON.parse(String(init?.body)))
+      const reply = replies.shift() ?? { probability: 0.9 }
+      if (reply.status) {
+        return new Response('{"error":{}}', { status: reply.status })
+      }
       return Response.json({
-        answers: { asks: { type: 'noul', noul: 0.9 }, chat: { type: 'noul', noul: chat } }
+        answers: [
+          'refusal' in reply
+            ? { type: 'refusal', name: 'for_the_bot' }
+            : { type: 'predicate', name: 'for_the_bot', probability: reply.probability }
+        ]
       })
     })
     const decider = new SlackGateDecider({
       readKey: async () => 'k1',
       now: Date.now,
-      askJev: (input) => askSlackGateJev({ ...input, fetch }),
+      askOpenAI: (input) => askSlackGateOpenAI({ ...input, fetch }),
       runCommand: () => {
         throw new Error('unused')
       }
     })
-    const rules: BotSlackGate = {
-      ...gate(),
-      kind: 'jev',
-      appliesTo: ['mention', 'thread_reply'],
-      jev: {
-        questions: { asks: { type: 'noul', instructions: 'Asks?' }, chat: { type: 'noul' } },
-        send: { message: true, earlierMessages: true, botName: true },
-        rules: [
-          { question: 'asks', wakeIf: { atLeast: 0.7 } },
-          { question: 'chat', blockIf: { atLeast: 0.8 } }
-        ]
-      }
+    const slackGate: BotSlackGate = {
+      on: true,
+      kind: 'openai',
+      appliesTo: ['thread_reply'],
+      timeoutSeconds: 10,
+      onError,
+      openai: SLACK_GATE_DEFAULT_RULES
     }
+    const data = (index: number) => bodies[index]?.input[1]?.content[0]?.data
+    return { bodies, replies, fetch, decider, slackGate, data }
+  }
+  const held = { outcome: 'accepted', held: true }
+
+  it('wakes for a reply meant for the bot or an unsure one, holds one that is not, and fails open', async () => {
+    const gated = openai()
     const store = await home()
-    const { deliver } = connector(store, [bot({ slackGate: rules })], (b, e, o) =>
-      decider.decide(b, e, o)
+    const { deliver } = connector(store, [bot({ slackGate: gated.slackGate })], (b, e, o) =>
+      gated.decider.decide(b, e, o)
     )
-    const unreadable = { ...asker('1800000000.000500'), context: [{ kind: 'unreadable' as const }] }
-    expect(await deliver(start(FRESH, { asker: unreadable }))).toEqual({
-      outcome: 'accepted',
-      held: true
+    gated.replies.push(
+      { probability: 0.9 },
+      { probability: 0.1 },
+      { probability: 0.3 },
+      { refusal: true },
+      { status: 503, probability: 0 }
+    )
+    const results: unknown[] = []
+    for (let i = 0; i < 5; i++) {
+      results.push(await deliver(send(LINKED, { text: `reply ${i}` })))
+    }
+    expect(results.map((result) => JSON.stringify(result) === JSON.stringify(held))).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false
+    ])
+    expect(gated.bodies[0]?.questions).toEqual(SLACK_GATE_DEFAULT_RULES.questions)
+    // The cloud marks only a sure mention, so `mentioned` is absent here.
+    expect(gated.data(0)).toEqual({
+      message: 'please look',
+      fromRole: 'member',
+      botName: 'Reviewer'
     })
-    expect(bodies[0]).toEqual({
-      model: 'jev-latest',
-      state: {
-        message: 'please look',
-        earlierMessages: ['(this thread could not be read)'],
-        botName: 'Reviewer'
-      },
-      questions: rules.kind === 'jev' ? rules.jev.questions : null
+    // A sure mention is never checked.
+    await deliver(send(LINKED, { mentioned: true }))
+    expect(gated.fetch).toHaveBeenCalledTimes(5)
+    // Failing closed instead: a refusal or a server error holds.
+    const strict = openai('block')
+    const closed = connector(store, [bot({ slackGate: strict.slackGate })], (b, e, o) =>
+      strict.decider.decide(b, e, o)
+    )
+    strict.replies.push({ refusal: true }, { status: 500, probability: 0 })
+    expect(await closed.deliver(send(LINKED))).toEqual(held)
+    expect(await closed.deliver(send(LINKED))).toEqual(held)
+  })
+
+  it('fails the check without asking when the thread could not be read, whatever the marker order', async () => {
+    for (const context of [
+      [{ kind: 'more' as const }, { kind: 'unreadable' as const }],
+      [{ kind: 'unreadable' as const }, { kind: 'more' as const }]
+    ]) {
+      const gated = openai('block')
+      const store = await home()
+      const { deliver } = connector(store, [bot({ slackGate: gated.slackGate })], (b, e, o) =>
+        gated.decider.decide(b, e, o)
+      )
+      expect(
+        await deliver(send(LINKED, { asker: { ...asker('1800000000.000600'), context } }))
+      ).toEqual(held)
+      expect(gated.fetch).not.toHaveBeenCalled()
+      await closeTestStores()
+    }
+  })
+
+  it('judges a batch by every message in it, and checks a start whose mention is unknown', async () => {
+    const gated = openai()
+    const store = await home()
+    const { wakeGate, deliver } = connector(
+      store,
+      [bot({ slackGate: gated.slackGate })],
+      (b, e, o) => gated.decider.decide(b, e, o)
+    )
+    const head = send(LINKED, { asker: { ...asker('1800000000.000600'), text: 'thanks!' } })
+    const next = send(LINKED, {
+      asker: { ...asker('1800000000.000610'), text: 'and can you check the deploy?' }
     })
-    chat = 0.1
-    const fresh = { source: 'slack' as const, externalId: 'T1:C1:1800000000.000700:U0BOT' }
-    // Woken, it goes on to the chat start (which this test's host has no chat for): never held.
-    const woken = await deliver(start(fresh, { asker: asker('1800000000.000700') }))
-    expect(fetch).toHaveBeenCalledTimes(2)
-    expect(woken).not.toEqual({ outcome: 'accepted', held: true })
+    const admit = wakeGate.wakeGate(head, [next], DEADLINE)
+    expect(await admit?.(new AbortController().signal, { botId: 'bot1' })).toBeNull()
+    expect(gated.data(0)).toMatchObject({
+      message: 'thanks!',
+      laterMessages: ['and can you check the deploy?']
+    })
+    // A start inside an existing thread may be a mention the cloud can't mark: it is checked.
+    const inThread = start(FRESH, { asker: asker('1800000000.000700') })
+    gated.replies.push({ probability: 0.1 })
+    expect(await deliver(inThread)).toEqual(held)
+    expect(gated.fetch).toHaveBeenCalledTimes(2)
   })
 })

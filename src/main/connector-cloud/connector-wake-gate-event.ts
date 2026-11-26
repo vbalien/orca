@@ -1,7 +1,11 @@
 // A cloud delivery as the Slack wake gate reads it: which case it is, and its normalized event.
 import type { ConnectorDelivery } from '../../shared/connectors/connector-cloud-contract'
 import type { ConnectorAsker } from '../../shared/connector-asker-contract'
-import type { SlackGateCase, SlackGateEvent } from '../../shared/bots/bot-slack-gate'
+import {
+  slackGateContextIncomplete,
+  type SlackGateCase,
+  type SlackGateEvent
+} from '../../shared/bots/bot-slack-gate'
 
 export type StartOrSend = Extract<ConnectorDelivery, { kind: 'start' | 'send' }>
 type Send = Extract<ConnectorDelivery, { kind: 'send' }>
@@ -97,9 +101,7 @@ export function slackGateEventOf(
       : []
   )
   const messageTs = messageTsOf(asker)
-  const incomplete = asker?.context.find(
-    (item) => item.kind === 'unreadable' || item.kind === 'more'
-  )?.kind
+  const incomplete = slackGateContextIncomplete(asker?.context)
   return {
     eventId: delivery.deliveryId,
     ...slackGateCaseOf(delivery, mentionsKnown),

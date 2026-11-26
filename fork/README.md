@@ -47,7 +47,7 @@ fork/rebase-onto-release.sh v1.4.276 --release 1
   3. 원격 서버 템플릿이 전체 대상으로 온전하다. app.asar에 업데이트 꺼짐 플래그가 치환돼 있고 포크 안내 문구가 있다.
   4. 시스템 electron으로 node-pty·koffi PTY와 CLI `--version`이 버전과 같다. AppImage를 풀어 번들 Electron으로도 CLI 버전이 같다.
   5. 별도 Xvfb 화면·독립 D-Bus·빈 HOME/XDG로 앱을 띄워 창이 뜨고(화면 캡처 저장), 그 격리 런타임의 `status --json`이 준비·같은 버전·`updater-unavailable`이다.
-  - `--keep`이면 앱을 띄운 채 두고 CDP 포트를 알려 준다. 거기서 `fork/screen-checks.txt`의 화면 확인(Slack 연결 방식·"깨우기 전에 확인" 카드, Jev JSON 편집의 오류 표시·저장·다시 열기, 업데이트 안내)을 하고, 출력된 `fork/verify-linux-release.sh --stop <작업 폴더>`로 끝낸다(정리에 실패한 실행도 같은 명령). `--stop`은 작업 폴더를 통째로 지운다: 남길 화면 캡처는 그 전에 밖으로 복사한다.
+  - `--keep`이면 앱을 띄운 채 두고 CDP 포트를 알려 준다. 거기서 `fork/screen-checks.txt`의 화면 확인(Slack 연결 방식·"깨우기 전에 확인" 카드, OpenAI Decisions JSON 편집의 기본값·오류 표시·저장·다시 열기, 업데이트 안내)을 하고, 출력된 `fork/verify-linux-release.sh --stop <작업 폴더>`로 끝낸다(정리에 실패한 실행도 같은 명령). `--stop`은 작업 폴더를 통째로 지운다: 남길 화면 캡처는 그 전에 밖으로 복사한다.
   - 화면 확인 5)(페어링 클라이언트의 게이트 API 키)는 서버와 클라이언트를 따로 띄워야 한다. 저장소 밖 도구 `~/orca-fork-build/gate-key-from-paired/e2e/pkg-paired-check.sh <작업 폴더> start|stop`이 `--keep` 작업 폴더의 Arch 패키지로 격리 서버(버리는 키링)와 페어링한 격리 데스크톱을 띄우고 CDP 포트를 알려 준다. `stop`을 먼저 한 뒤 `--stop`한다(그 도구가 띄운 데몬이 작업 폴더를 쓰고 있으면 `--stop`이 지우지 않는다).
 - 맥·윈도우·리눅스 arm64는 여기서 실행해 볼 수 없다. 워크플로 안의 CLI `--version`·서명 검사까지만 한다(릴리즈 노트에 "실행 미확인").
 - 실패하면: 일시적인 러너 오류면 `gh run rerun <id> -R vbalien/orca --failed` 뒤 같은 스크립트 명령으로 다시 기다린다(하루 안에). 코드·설정·워크플로를 고쳐야 하거나 하루가 지났으면 다음 번호(`--release 2`)로 다시 낸다. 실패한 초안·태그는 남겨 두고 정리 여부를 따로 정한다.
@@ -67,6 +67,29 @@ fork/rebase-onto-release.sh v1.4.276 --release 1
    - **같은 업스트림 버전으로 다시**(예: fork-v1.4.277-2): `fork/v1.4.277`은 이미 있어 스크립트가 그 브랜치를 이어서 쓴다(main에서 출발하지 않음). 그 작업 공간에서 병합 커밋을 옮기고, 새 기능을 릴리즈 노트(`fork/release-notes.template.md`의 주요 기능·알려진 한계)와 화면 확인(`fork/screen-checks.txt`)에 적어야 하면 같은 작업 공간에서 `fork:` 커밋으로 더한 뒤(태그가 그 커밋에서 렌더링된다) 다음 번호로 낸다:
      `git -C ~/orca-fork-build/src/v1.4.277 fetch origin main && git -C ~/orca-fork-build/src/v1.4.277 cherry-pick <main의 squash 커밋>` → `fork/rebase-onto-release.sh v1.4.277 --release 2`(생성 파일이 바뀌었을 때만 재생성 커밋을 새로 쌓고, 브랜치는 fast-forward로 올린다). 스크립트는 저장소의 어느 작업 트리에서 실행해도 된다(작업 공간 `src/<태그>`를 쓴다).
 4. 게시 뒤 main은 새 릴리즈로 바뀐다. 그 릴리즈에 없는 main 커밋(예: 릴리즈를 만든 뒤 병합한 PR)이 있으면 sync-main.sh가 멈추고 목록을 보여 준다 — 그 커밋을 다음 릴리즈에 넣은 뒤 다시 맞춘다. 이식하면서 충돌로 내용이 바뀐 커밋은 자동 통과하지 않는다: 안내된 `git range-diff`·`git diff`로 확인한 뒤 `fork/sync-main.sh <태그> --confirm-ported <SHA>`(업스트림에 흡수된 경우 `--confirm-upstream <포크SHA>=<업스트림SHA>`).
+
+## OpenAI 게이트 임계값 맞추기
+
+`fork/gate-tune/tune.ts`는 정답이 붙은 글 묶음(JSONL, 예: `fork/gate-tune/cases.example.jsonl` — 지어낸 글)으로 "깨우기 전에 확인"의 OpenAI Decisions 규칙을 시험한다. 게이트의 실제 요청 생성기·답 읽기·규칙 판정을 그대로 쓴다.
+
+```bash
+node fork/gate-tune/fake-decisions.mjs 18911 &   # 먼저 가짜 서버로
+node --import tsx fork/gate-tune/tune.ts --cases fork/gate-tune/cases.example.jsonl --max-input-tokens 50000 --endpoint http://127.0.0.1:18911
+node --import tsx fork/gate-tune/tune.ts --cases <글.jsonl> --max-input-tokens 50000 [--config <규칙.json>] --live --out <결과.json>
+```
+
+- `--live` 없이(그리고 `--endpoint` 없이) 돌리면 요청 수와 예상 토큰만 센다. `--endpoint`는 loopback만 받는다.
+- 실제 키는 `~/.config/orca-fork/openai-key`(권한 600; `--key-file`로 바꿈)에서만 읽는다. 출력·결과 파일에 키와 글 원문을 쓰지 않는다(결과는 id·정답·값만).
+- 실제 실행(`--live`)은 장부 `~/.config/orca-fork/calibration/spend.jsonl`에 실행마다 예약·정산을 남기고, 장부 합계 + 이번 예산이 `--total-usd-cap`(기본 20달러)을 넘으면 시작하지 않는다. 한 번에 하나만(잠금 `spend.jsonl.lock`; 죽은 실행이 남긴 잠금은 도는 실행이 없을 때 손으로 지운다).
+- `--max-input-tokens`는 추정 예산이다(요청마다 본문 바이트 + 256을 미리 잡고 응답의 usage로 정산; 바이트 단위 토크나이저라는 가정). 넘길 요청은 보내지 않고 멈춘다. 끝에 질문별 값 분포, 임계값별 놓침(깨워야 하는데 막음)·헛깨움 수, 놓침 0인 가장 높은 `atLeast`로 바꾼 규칙 전체(`unsureFrom` 없이) 제안(모든 사례가 끝까지 답했을 때만), 지금 설정의 결과, 쓴 토큰과 비용($0.10/1M 입력, 출력 무료)을 낸다.
+
+지금 기본값(`src/shared/bots/slack-gate-default-rules.ts`)은 2026-11-26에 이렇게 골랐다(원문은 저장소 밖 보정 폴더에만 있다).
+
+- 글: 봇이 끼어든 실제 스레드 11개의 그 뒤 사람 글 143개(깨워야 함 9 — 그중 멘션 4, 아님 126, 애매 8) + 지어낸 예시 30개(깨워야 함 16, 아님 14). 맞추기(스레드 4개)·확인(스레드 7개)은 스레드 단위로 나눴다. 애매 8개 중 하나는 결과를 본 뒤 옮겼다(봇이 올린 결과물에 "이대로 진행"이라고 답한 글: 봇을 부르지 않았지만 일을 허락하는 말이라 판단이 갈림).
+- 질문 문구 9가지 × 앞 글 개수(10·5·0)를 비교했다. 앞 글을 안 보내면 놓침이 크게 는다. 고른 문구는 "멘션이면 참 / 본문에 남은 `<@…>`는 다른 사람·앱" 설명을 더한 것이다. 확인 묶음의 헛깨움(다른 봇과의 대화)을 보고 문구 두 개를 더 시험했지만 나아지지 않아 채택하지 않았다.
+- 고른 값(atLeast 0.5, unsureFrom 0.25, whenUnsure wake → 실질 기준 0.25)에서: 맞추기 묶음 놓침 0/3·헛깨움 9/111, 확인 묶음 놓침 0/2·헛깨움 7/15(옛 문구는 합쳐 28/126), 지어낸 예시 놓침 0/16·헛깨움 0/14. 실제 깨워야 할 글의 가장 낮은 값 0.63, 지어낸 예시 0.54.
+- 표본이 작다(실제 깨워야 할 답글 5개). 확인 묶음의 헛깨움은 대부분 "이 봇이 부탁한 일을 받은 사람이 자기 봇에게 넘기는 대화" 같은 다른 봇과의 대화다. 짧은 멘션(본문에서 봇 멘션이 지워져 두세 글자만 남는 글)은 `mentioned: true`여도 낮게 나온다 — 기본값은 멘션을 확인하지 않으므로 괜찮지만, 멘션까지 확인하게 바꾸거나 Orca Cloud 경로(멘션인지 모르는 스레드 글)에서는 놓칠 수 있다.
+- 지연 p50 235ms, p95 454ms. 글 하나에 입력 약 1,150토큰(약 0.00012달러). refusal은 관측되지 않았다.
 
 ## 정리
 
