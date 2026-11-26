@@ -93,9 +93,9 @@ export function countWake(bot: BotCounts, entry: PendingEntry, at: number): void
 }
 
 /** A deleted bot's counts: in memory only, its file never written again. */
-export function closedCounts(file: BotStateFile): BotCounts {
+export function closedCounts(botId: string, file: BotStateFile): BotCounts {
   file.close()
-  return { file, keys: new Map(), pending: new Map(), unsafe: false }
+  return { botId, file, keys: new Map(), pending: new Map(), unsafe: false }
 }
 
 export type SlackGatePendingStatus = {
@@ -150,4 +150,36 @@ export function channelWakesOf(
     })
   )
   return { wakes, pulled }
+}
+
+/** A trigger's reservation left unreconciled a day on (Orca Cloud no longer brings this bot events
+ *  that would reconcile it, or its run's record is gone). */
+export function staleTriggerCounts(bot: BotCounts, at: number, afterMs: number): string[] {
+  return [...bot.pending.values()].flatMap((entry) =>
+    entry.phase !== 'settled' && entry.runId && !entry.creating && at - entry.at >= afterMs
+      ? [entry.id]
+      : []
+  )
+}
+
+const WARN_EVERY_MS = 60_000
+
+/** One line per bot and cause a minute, with how many times it came since. */
+export function warnOncePerMinute(
+  lastWarn: Map<string, { at: number; count: number }>,
+  warn: (message: string, fields?: Record<string, unknown>) => void,
+  now: number,
+  botId: string,
+  cause: string,
+  fields: Record<string, unknown>
+): void {
+  const key = `${botId} ${cause}`
+  const seen = lastWarn.get(key) ?? { at: 0, count: 0 }
+  seen.count++
+  if (now - seen.at >= WARN_EVERY_MS) {
+    warn(`[slack-gate] ${cause}`, { botId, ...fields, times: seen.count })
+    lastWarn.set(key, { at: now, count: 0 })
+  } else {
+    lastWarn.set(key, seen)
+  }
 }

@@ -9,7 +9,11 @@ for side in desk srv; do p=$(mine $R/$side/run); [ -n "$p" ] && kill $p 2>/dev/n
 sleep 2
 [ -f $R/fake.pid ] && kill "$(cat $R/fake.pid)" 2>/dev/null
 # Only this run's: its inject has this run's folder in its arguments, its Xvfb a pid file here.
-for p in $(pgrep -f "^node $EX/inject\.mjs .*$RX/"); do kill $p; done
+# An inject is this run's when its arguments are exactly this script and this run's ready file.
+for p in $(pgrep -f "inject\.mjs"); do
+  args=(); while IFS= read -r -d '' a; do args+=("$a"); done < /proc/$p/cmdline 2>/dev/null
+  [ "${args[1]:-}" = "$E/inject.mjs" ] && [ "${args[${#args[@]}-1]:-}" = "$R/hook-ready" ] && kill $p
+done
 for side in srv desk; do [ -f $R/xvfb-$side.pid ] && kill "$(cat $R/xvfb-$side.pid)" 2>/dev/null; rm -f $R/xvfb-$side.pid; done
 for side in desk srv; do mountpoint -q $R/$side/run/gvfs && fusermount -u $R/$side/run/gvfs; done
 sleep 1

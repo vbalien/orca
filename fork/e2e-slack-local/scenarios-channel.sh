@@ -14,6 +14,8 @@ step "7 reply in a people-only thread (bot not in it), [wake]" 12 "$(reply $T2 '
 say "7 checked as" "$(lastcase)" channel_message
 step "8 top-level [wake] the agent answers NO_REPLY" 12 "$(top '[wake] [quiet] who has the projector?')" 1/+/0; T8=$(cat $R/last-ts)
 step "8b reply in that quiet thread, [chat] (still a channel message)" 8 "$(reply $T8 '[chat] found it')" 1/0/0; say "8b checked as" "$(lastcase)" channel_message
+step "8f top-level [wake] the agent's request fails (before the bot joined: no failure line)" 40 "$(top '[wake] [fail] who has the printer key?')" 1/+/0; TF=$(cat $R/last-ts)
+step "8g reply in that thread, [chat] (still a channel message)" 8 "$(reply $TF '[chat] nevermind')" 1/0/0; say "8g checked as" "$(lastcase)" channel_message
 step "9 reply in thread 1 the bot answered, [chat] (now a thread reply)" 8 "$(reply $T1 '[chat] thanks!')" 1/0/0; say "9 checked as" "$(lastcase)" thread_reply
 step "10 mention in quiet thread 8" 12 "{\"user\":\"U0ASKER1\",\"text\":\"[chat] are you there?\",\"channel\":\"C0CHAN01\",\"thread_ts\":\"$T8\"}" 0/+/1
 

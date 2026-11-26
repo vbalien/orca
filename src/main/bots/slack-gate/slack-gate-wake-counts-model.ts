@@ -75,6 +75,7 @@ export type Reservation = {
 
 export type SlackGateBotCounts = BotCounts
 export type BotCounts = {
+  botId: string
   file: BotStateFile
   keys: Map<string, Map<string, CountEntry>>
   pending: Map<string, LiveEntry>

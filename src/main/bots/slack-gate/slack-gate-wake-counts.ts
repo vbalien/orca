@@ -24,7 +24,9 @@ import {
   channelWakesOf,
   closedCounts,
   pruneCounts,
-  serializeCounts
+  serializeCounts,
+  staleTriggerCounts,
+  warnOncePerMinute
 } from './slack-gate-wake-counts-entries'
 
 export {
@@ -40,8 +42,9 @@ const FOLDER = 'bot-slack-gate-wakes'
 export const RESERVATION_WAIT_MS = 2 * 60_000
 const MAX_PENDING = 200
 const MAX_KEYS = 1000
+// A trigger's count still unreconciled after this long counts at its own time.
+const STALE_TRIGGER_MS = 86_400_000
 const OLD_PENDING_WARN_MS = 10 * 60_000
-const WARN_EVERY_MS = 60_000
 
 export type SlackGateWakeCountsDeps = {
   now: () => number
@@ -57,16 +60,15 @@ export class SlackGateWakeCounts {
 
   constructor(private readonly deps: SlackGateWakeCountsDeps) {}
 
-  private warn(cause: string, fields: Record<string, unknown> = {}): void {
-    const now = this.deps.now()
-    const seen = this.lastWarn.get(cause) ?? { at: 0, count: 0 }
-    seen.count++
-    if (now - seen.at >= WARN_EVERY_MS) {
-      ;(this.deps.warn ?? console.warn)(`[slack-gate] ${cause}`, { ...fields, times: seen.count })
-      this.lastWarn.set(cause, { at: now, count: 0 })
-    } else {
-      this.lastWarn.set(cause, seen)
-    }
+  private warn(botId: string, cause: string, fields: Record<string, unknown> = {}): void {
+    warnOncePerMinute(
+      this.lastWarn,
+      this.deps.warn ?? console.warn,
+      this.deps.now(),
+      botId,
+      cause,
+      fields
+    )
   }
 
   /** The bot's counts, read once. `longestCooldownMinutes`: how long an unreadable file blocks. */
@@ -76,7 +78,7 @@ export class SlackGateWakeCounts {
     let loading = this.bots.get(botId)
     if (!loading) {
       loading = this.forgotten.has(botId)
-        ? Promise.resolve(closedCounts(new BotStateFile(FOLDER, botId)))
+        ? Promise.resolve(closedCounts(botId, new BotStateFile(FOLDER, botId)))
         : this.read(botId, longestCooldownMinutes)
       this.bots.set(botId, loading)
     }
@@ -85,7 +87,7 @@ export class SlackGateWakeCounts {
 
   private async read(botId: string, longestCooldownMinutes: number): Promise<BotCounts> {
     const file = new BotStateFile(FOLDER, botId)
-    const bot: BotCounts = { file, keys: new Map(), pending: new Map(), unsafe: false }
+    const bot: BotCounts = { botId, file, keys: new Map(), pending: new Map(), unsafe: false }
     const read = await file.read()
     const parsed = read.kind === 'ok' ? StateFile.safeParse(read.value) : null
     if (read.kind === 'missing') {
@@ -96,12 +98,10 @@ export class SlackGateWakeCounts {
       const now = this.deps.now()
       bot.unsafe = true
       bot.blockedUntil = Math.max(nextLocalMidnight(now), now + longestCooldownMinutes * 60_000)
-      this.warn('wake counts unreadable; limited rules wait', { botId })
+      this.warn(botId, 'wake counts unreadable; limited rules wait')
       // The unreadable file is replaced only once it is kept aside; until then limited rules wait.
       if (!(await file.preserveUnreadable())) {
-        this.warn('wake counts unreadable and could not be kept aside; limited rules wait', {
-          botId
-        })
+        this.warn(botId, 'wake counts unreadable and could not be kept aside; limited rules wait')
         return bot
       }
       if (await file.write(() => serializeCounts(bot, this.deps.now()))) {
@@ -137,6 +137,7 @@ export class SlackGateWakeCounts {
     if (bot.unsafe || (bot.blockedUntil !== undefined && at < bot.blockedUntil)) {
       return false
     }
+    this.settleStale(bot, at)
     const key = slackGateWakeKey(question)
     const entry = bot.keys.get(channelId)?.get(key)
     // The clock went back past the last wake: that wake counts as now, so a cooldown runs from here
@@ -147,7 +148,9 @@ export class SlackGateWakeCounts {
     }
     const pending = pendingFor(bot, channelId, key)
     if (overKeyCap(bot, channelId, key, at, MAX_KEYS)) {
-      this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
+      this.warn(bot.botId, 'too many limited rules to count; this one waits', {
+        channels: bot.keys.size
+      })
       return false
     }
     const day = entry && entry.day > localDay(at) ? entry.day : localDay(at)
@@ -168,6 +171,7 @@ export class SlackGateWakeCounts {
 
   /** What stdin's `wakes` tells a rules script about one channel. */
   channelWakes(bot: BotCounts, channelId: string, at: number) {
+    this.settleStale(bot, at)
     const { wakes, pulled } = channelWakesOf(bot, channelId, at)
     if (pulled) {
       void bot.file.write(() => serializeCounts(bot, this.deps.now()))
@@ -190,14 +194,18 @@ export class SlackGateWakeCounts {
   ): Reservation | null {
     const live = [...bot.pending.values()].filter((entry) => entry.phase !== 'settled')
     if (live.length >= MAX_PENDING) {
-      this.warn('too many wakes waiting to be counted; this one waits', { pending: live.length })
+      this.warn(bot.botId, 'too many wakes waiting to be counted; this one waits', {
+        pending: live.length
+      })
       return null
     }
     const key = slackGateWakeKey(input.question)
     const current = bot.keys.get(input.channelId)?.get(key)
     // A new rule's count needs room, as open() saw it; another reservation may have taken it since.
     if (overKeyCap(bot, input.channelId, key, input.at, MAX_KEYS)) {
-      this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
+      this.warn(bot.botId, 'too many limited rules to count; this one waits', {
+        channels: bot.keys.size
+      })
       return null
     }
     const today = localDay(input.at)
@@ -239,7 +247,9 @@ export class SlackGateWakeCounts {
     }
     const oldTimer = (this.deps.setTimer ?? setTimeout)(() => {
       if (entry.phase === 'delivering') {
-        this.warn('a wake has waited long to be counted', { ageMs: this.deps.now() - entry.at })
+        this.warn(bot.botId, 'a wake has waited long to be counted', {
+          ageMs: this.deps.now() - entry.at
+        })
       }
     }, OLD_PENDING_WARN_MS)
     oldTimer.unref?.()
@@ -247,7 +257,7 @@ export class SlackGateWakeCounts {
       id: entry.id,
       persisted: persisted.then((ok) => {
         if (!ok) {
-          this.warn('could not write a wake count; not waking', {})
+          this.warn(bot.botId, 'could not write a wake count; not waking')
           settle(null)
         }
         return ok
@@ -292,6 +302,17 @@ export class SlackGateWakeCounts {
           ]
         : []
     )
+  }
+
+  /** A trigger's count no run record settled in a day (Orca Cloud stopped bringing this bot events,
+   *  say) counts at its own time, conservatively, rather than hold its limit for good. */
+  private settleStale(bot: BotCounts, at: number): void {
+    for (const id of staleTriggerCounts(bot, at, STALE_TRIGGER_MS)) {
+      const entry = bot.pending.get(id)
+      if (entry) {
+        this.settleUnsettled(bot, id, entry.at)
+      }
+    }
   }
 
   settleUnsettled(bot: BotCounts, id: string, at: number | null): void {

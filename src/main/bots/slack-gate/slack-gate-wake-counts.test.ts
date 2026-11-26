@@ -337,3 +337,35 @@ it('counts an old, no longer kept rule as new under the key cap', async () => {
   expect(store.open(bot, 'C1', 'old', daily, now)).toBe(false)
   expect(store.reserve(bot, { channelId: 'C1', question: 'old', at: now })).toBeNull()
 })
+
+it('counts a trigger’s reservation no run record settled within a day at its own time', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const reservation = store.reserve(bot, {
+    channelId: 'C1',
+    question: 'banter',
+    at: now,
+    automationId: 'a1',
+    runId: 'run-1'
+  })!
+  reservation.creating = false
+  await reservation.persisted
+  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(false)
+  // A day and a bit on, with nothing reconciling it: it counted on its own day, and today is free.
+  advance(86_400_000 + 60_000)
+  expect(store.open(bot, 'C1', 'banter', daily, now)).toBe(true)
+  expect((await store.pendingStatus('b1')).pending).toBe(0)
+})
+
+it('warns once a minute per bot and cause, never hiding another bot’s', () => {
+  const lines: unknown[] = []
+  const store = new SlackGateWakeCounts({ now: () => now, warn: (...line) => lines.push(line) })
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the private warn this test drives.
+  const warn = (store as unknown as { warn: (botId: string, cause: string) => void }).warn.bind(
+    store
+  )
+  warn('a', 'unreadable')
+  warn('b', 'unreadable')
+  warn('a', 'unreadable')
+  expect(lines).toHaveLength(2)
+})

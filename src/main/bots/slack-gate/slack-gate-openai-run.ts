@@ -233,11 +233,12 @@ export class SlackGateOpenAIRun {
     if (result.kind === 'error') {
       return failed('The rules script could not start')
     }
-    if (result.code !== 0) {
-      return failed(`The rules script exited with ${result.code}`, { exitCode: result.code })
-    }
+    // Too much output stops the script: that, not how it then ended, is what went wrong.
     if (result.stdoutTooLarge) {
       return failed('The rules script printed too much')
+    }
+    if (result.code !== 0) {
+      return failed(`The rules script exited with ${result.code}`, { exitCode: result.code })
     }
     const answer = readRulesScriptOutput(result.stdout ?? '')
     if (answer.kind === 'error') {
