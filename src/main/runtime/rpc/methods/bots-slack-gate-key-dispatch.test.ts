@@ -4,6 +4,7 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { format } from 'node:util'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Bot } from '../../../../shared/bot-types'
 import { CLI_AGENT_CALLER_CLIENT_CAPABILITY } from '../../../../shared/remote-runtime/cli-agent-caller-capability'
@@ -25,7 +26,7 @@ const seal = (text: string) => Buffer.from(`SEALED:${Buffer.from(text).toString(
 let dir: string
 let runtime: OrcaRuntimeService
 let events: unknown[]
-let logged: unknown[]
+let logged: string[]
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'orca-slack-gate-dispatch-'))
   useSlackGateKeyRoot(dir)
@@ -47,7 +48,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   logged = []
   for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
-    vi.spyOn(console, level).mockImplementation((...args) => logged.push(args))
+    // As the console prints them, so an Error's message and stack count too.
+    vi.spyOn(console, level).mockImplementation((...args) => logged.push(format(...args)))
   }
 })
 afterEach(() => {
@@ -74,6 +76,7 @@ function dispatch(method: string, params: unknown, transport: RpcDispatchStreami
 
 it('saves a key from a person’s paired computer, refuses the CLI there, and never echoes the key', async () => {
   expect(leaks({ nested: [KEY] })).toBe(true)
+  expect(format(new Error(KEY)).includes(MARK)).toBe(true)
   const answers = [
     await dispatch('bots.slackGate.setKey', { botId: 'b1', key: KEY }, AGENT),
     await dispatch('bots.slackGate.setKey', { botId: 'b1', key: `${KEY}\nX-Other: y` }, PERSON)
@@ -104,6 +107,6 @@ it('saves a key from a person’s paired computer, refuses the CLI there, and ne
   // Past the debounce of bot change notices, so a queued event would have gone out.
   await vi.runAllTimersAsync()
   expect(answers.some(leaks)).toBe(false)
-  expect(logged.some(leaks)).toBe(false)
+  expect(logged.some((line) => line.includes(MARK))).toBe(false)
   expect(events.some(leaks)).toBe(false)
 })
