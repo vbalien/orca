@@ -2,7 +2,7 @@
 import { usesLocalSlack, type BotSlackConnection } from '../../shared/bots/bot-slack-connection'
 
 export const LOCAL_SLACK_TRIGGER_REFUSAL =
-  "This bot uses its own Slack app on this computer, which doesn't run Slack automation triggers yet. Use a schedule, or a Linear or GitHub trigger."
+  "This bot uses its own Slack app, which doesn't run Slack automation triggers yet. Use a schedule, or a Linear or GitHub trigger."
 
 /** Throws when a bot on its own Slack app would get a Slack event trigger. */
 export function refuseLocalSlackTriggers(

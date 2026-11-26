@@ -26,9 +26,17 @@ export function isSlackRecord(value: unknown): value is Record<string, unknown> 
 export const slackFields = (value: unknown): Record<string, unknown> =>
   isSlackRecord(value) ? value : {}
 
+// Outside strings become error codes only in these shapes, so nothing else (a token echoed back, say)
+// rides along into answers, statuses or logs.
+const SLACK_ERROR_CODE = /^[a-z0-9_]{1,64}$/
+const NETWORK_ERROR_CODE = /^(E[A-Z0-9_]{2,40}|UND_ERR_[A-Z0-9_]{1,40})$/
+
 function causeCode(error: unknown): string | undefined {
   const code = error instanceof Error ? slackFields(error.cause).code : undefined
-  return typeof code === 'string' ? code : undefined
+  if (typeof code !== 'string') {
+    return undefined
+  }
+  return NETWORK_ERROR_CODE.test(code) ? code : 'network'
 }
 
 function retryAfterMs(response: Response): number | undefined {
@@ -86,7 +94,10 @@ export async function callSlack(
   }
   const answer = slackFields(json)
   if (answer.ok !== true) {
-    const code = typeof answer.error === 'string' ? answer.error : 'unknown_error'
+    const code =
+      typeof answer.error === 'string' && SLACK_ERROR_CODE.test(answer.error)
+        ? answer.error
+        : 'unknown_error'
     throw new SlackApiError(code, 'refused', code === 'ratelimited' ? 1000 : undefined)
   }
   return answer

@@ -1,5 +1,6 @@
 // Bots whose Slack runs through their own app on this computer: one Socket Mode connection each,
-// their messages into the conversation seam, and their answers back to the thread. Desktop only.
+// their messages into the conversation seam, and their answers back to the thread. Electron hosts
+// only: the desktop app and `orca serve` on Electron.
 import type { Bot } from '../../shared/bot-types'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
 import { usesLocalSlack } from '../../shared/bots/bot-slack-connection'
@@ -319,7 +320,7 @@ export class SlackLocalService {
 
 let installed: SlackLocalService | null = null
 
-/** This desktop's local Slack service; null on hosts without it (orcad, `orca serve`). */
+/** This host's local Slack service; null on hosts without it (orcad). */
 export function slackLocalService(): SlackLocalService | null {
   return installed
 }

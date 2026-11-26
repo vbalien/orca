@@ -9,4 +9,4 @@ export function withSlackConfigLock<T>(run: () => Promise<T>): Promise<T> {
 }
 
 export const SLACK_USES_LOCAL_APP =
-  'This bot uses its own Slack app on this computer. Switch it back to Orca Cloud in its Slack settings first.'
+  'This bot uses its own Slack app. Switch it back to Orca Cloud in its Slack settings first.'

@@ -1,5 +1,6 @@
-// `bots.slackLocal.*`: a bot's own Slack app on this desktop. Only the owner's Orca changes it: never
-// an agent's CLI, never a paired phone or computer; tokens go in and never come back out.
+// `bots.slackLocal.*`: a bot's own Slack app on its Electron host (the desktop app or `orca serve`).
+// The owner's Orca changes it, here or on a paired computer; never an agent's CLI. Tokens go in and
+// never come back out.
 import {
   BotSlackLocalAskers,
   BotSlackLocalBot,
@@ -12,16 +13,15 @@ import { slackLocalService, type SlackLocalService } from '../../../slack-local/
 import { defineMethod, InvalidArgumentError, type RpcContext } from '../core'
 import { ownerOnly } from './bots-caller-gates'
 
-const REFUSAL = 'Only your owner sets up your own Slack app, in Orca on this computer.'
+const REFUSAL = 'Only your owner sets up your own Slack app, in Orca.'
 
-function ownerDesktop(context: RpcContext): SlackLocalService {
+function ownerHost(context: RpcContext): SlackLocalService {
   ownerOnly(context, REFUSAL)
-  if (context.pairedDeviceId !== undefined) {
-    throw new InvalidArgumentError(REFUSAL)
-  }
   const service = slackLocalService()
   if (!service) {
-    throw new InvalidArgumentError('Your own Slack app runs only in the Orca desktop app.')
+    throw new InvalidArgumentError(
+      "Your own Slack app needs Orca's Electron runtime on the bot's computer: the desktop app, or `orca serve` with ORCA_SERVE_RUNTIME=electron."
+    )
   }
   return service
 }
@@ -32,7 +32,7 @@ async function change(
   botId: string,
   run: (service: SlackLocalService) => Promise<void>
 ) {
-  const service = ownerDesktop(context)
+  const service = ownerHost(context)
   await withSlackConfigLock(() => run(service))
   return await service.status(botId)
 }
@@ -42,7 +42,7 @@ export const BOT_SLACK_LOCAL_METHODS = [
     name: 'bots.slackLocal.status',
     permission: 'accounts-admin',
     params: BotSlackLocalBot,
-    handler: async ({ botId }, context) => ownerDesktop(context).status(botId)
+    handler: async ({ botId }, context) => ownerHost(context).status(botId)
   }),
   defineMethod({
     name: 'bots.slackLocal.useLocal',

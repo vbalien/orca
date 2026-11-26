@@ -1,4 +1,4 @@
-// The Connectors row for a bot whose Slack runs through its own app on this computer.
+// The Connectors row for a bot whose Slack runs through its own app on its computer.
 import React from 'react'
 import { useConfirmationDialog } from '@/components/dismiss/confirmation/confirmation-dialog-context'
 import { SlackIcon } from '@/components/icons/SlackIcon'
@@ -10,22 +10,25 @@ import { BotConnectorRowFrame } from '../BotConnectorRow'
 import type { BotConnectorTitle } from '../bot-connector-titles'
 import { BotSlackLocalSettings } from './BotSlackLocalSettings'
 import { useBotSlackLocal, type BotSlackLocalStatus } from './use-bot-slack-local'
+import { useBotAccessPlace } from '../use-bot-access-place'
 
 type Translate = ReturnType<typeof useTranslate>
 
 function face(
   status: BotSlackLocalStatus | null,
-  t: Translate
+  t: Translate,
+  computer: string
 ): { description: string; status: { label: string; tone: IntegrationCardStatusTone } | null } {
   const where = status?.teamName ?? status?.teamId
   switch (status?.connection.state) {
     case 'connected':
       return {
         description: where
-          ? t('bots.slackLocal.state.connectedTo', 'Your own app in {{place}}, on this computer', {
-              place: where
+          ? t('bots.slackLocal.state.connectedTo', 'Your own app in {{place}}, on {{computer}}', {
+              place: where,
+              computer
             })
-          : t('bots.slackLocal.state.connected', 'Your own app, on this computer'),
+          : t('bots.slackLocal.state.connected', 'Your own app, on {{computer}}', { computer }),
         // Connected, yet an answer didn't make it: the settings say which.
         status: status.lastReplyError
           ? {
@@ -76,7 +79,8 @@ export function BotSlackLocalCard({
   const t = useTranslate()
   const local = useBotSlackLocal(bot)
   const confirm = useConfirmationDialog()
-  const shown = face(local.status, t)
+  const { computer } = useBotAccessPlace(bot.hostId)
+  const shown = face(local.status, t, computer)
   const switchBack = async (): Promise<void> => {
     const confirmed = await confirm({
       title: t('bots.slackLocal.switchBack.title', 'Use Orca Cloud’s Slack app for {{name}}?', {
@@ -84,7 +88,8 @@ export function BotSlackLocalCard({
       }),
       description: t(
         'bots.slackLocal.switchBack.note',
-        'This computer stops listening to your own app and forgets its tokens and the people added for it. Then add Slack again from Connectors.'
+        'Orca on {{computer}} stops listening to your own app and forgets its tokens and the people added for it. Then add Slack again from Connectors.',
+        { computer }
       ),
       confirmLabel: t('bots.slackLocal.switchBack.confirm', 'Switch'),
       confirmVariant: 'destructive'

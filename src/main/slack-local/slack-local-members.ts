@@ -4,7 +4,7 @@ import type { Bot, BotMember } from '../../shared/bot-types'
 import { LOCAL_SLACK_SOURCE } from '../../shared/connectors/local-slack-conversation'
 
 export const LOCAL_SLACK_ASKERS_REFUSAL =
-  "People who may ask through the bot's own Slack app are added in its Slack settings on this computer."
+  "People who may ask through the bot's own Slack app are added in its Slack settings in Orca."
 
 const key = (member: Pick<BotMember, 'id' | 'workspaceId'>): string =>
   `${member.workspaceId ?? ''}:${member.id}`
