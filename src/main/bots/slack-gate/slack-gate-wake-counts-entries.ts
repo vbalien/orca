@@ -31,9 +31,9 @@ export function pendingFor(bot: BotCounts, channelId: string, key: string) {
   )
 }
 
-/** Counts kept whatever the cap: today's or still cooling down (14 days covers every cooldown), and
- *  those reservations will add. */
-export function keptKeys(bot: BotCounts, at: number): number {
+/** The counts kept whatever the cap, as `channel key`: today's or still cooling down (14 days covers
+ *  every cooldown), and those reservations will add. */
+function keptKeys(bot: BotCounts, at: number): Set<string> {
   const kept = new Set<string>()
   for (const [channelId, keys] of bot.keys) {
     for (const [key, entry] of keys) {
@@ -48,7 +48,19 @@ export function keptKeys(bot: BotCounts, at: number): number {
       kept.add(`${entry.channelId} ${entry.key}`)
     }
   }
-  return kept.size
+  return kept
+}
+
+/** Whether a rule's count can't take a new place under the cap (one already kept always can). */
+export function overKeyCap(
+  bot: BotCounts,
+  channelId: string,
+  key: string,
+  at: number,
+  max: number
+) {
+  const kept = keptKeys(bot, at)
+  return !kept.has(`${channelId} ${key}`) && kept.size >= max
 }
 
 export function pruneCounts(bot: BotCounts, at: number): void {

@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BotStateFile, useBotStateRoot } from './bot-state-file'
-import { RESERVATION_WAIT_MS, SlackGateWakeCounts, localDay } from './slack-gate-wake-counts'
+import {
+  RESERVATION_WAIT_MS,
+  SlackGateWakeCounts,
+  localDay,
+  slackGateWakeKey
+} from './slack-gate-wake-counts'
 
 let now = new Date(2026, 10, 26, 12, 0, 0).getTime()
 const timers: { at: number; run: () => void }[] = []
@@ -312,4 +317,23 @@ it('tells a rules script the counts as open() sees them after the clock went bac
   const [wakes] = Object.values(store.channelWakes(bot, 'C1', now))
   // Still today's one wake, and its time is now, not a day ahead.
   expect(wakes).toMatchObject({ today: 1, lastAt: now })
+})
+
+it('counts an old, no longer kept rule as new under the key cap', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const today = localDay(now)
+  bot.keys.set(
+    'C0',
+    new Map(Array.from({ length: 999 }, (_, i) => [`k${i}`, { day: today, count: 1, lastAt: now }]))
+  )
+  // Fifteen days old: no longer kept, so it would take a new place again.
+  const old = now - 15 * 86_400_000
+  bot.keys.set(
+    'C1',
+    new Map([[slackGateWakeKey('old'), { day: localDay(old), count: 1, lastAt: old }]])
+  )
+  expect(store.reserve(bot, { channelId: 'C1', question: 'a', at: now })).not.toBeNull()
+  expect(store.open(bot, 'C1', 'old', daily, now)).toBe(false)
+  expect(store.reserve(bot, { channelId: 'C1', question: 'old', at: now })).toBeNull()
 })

@@ -17,7 +17,7 @@ import {
 } from './slack-gate-wake-counts-model'
 import {
   countWake,
-  keptKeys,
+  overKeyCap,
   pendingFor,
   pendingStatusOf,
   type SlackGatePendingStatus,
@@ -146,7 +146,7 @@ export class SlackGateWakeCounts {
       void bot.file.write(() => serializeCounts(bot, this.deps.now()))
     }
     const pending = pendingFor(bot, channelId, key)
-    if (!entry && pending.length === 0 && keptKeys(bot, at) >= MAX_KEYS) {
+    if (overKeyCap(bot, channelId, key, at, MAX_KEYS)) {
       this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
       return false
     }
@@ -196,11 +196,7 @@ export class SlackGateWakeCounts {
     const key = slackGateWakeKey(input.question)
     const current = bot.keys.get(input.channelId)?.get(key)
     // A new rule's count needs room, as open() saw it; another reservation may have taken it since.
-    if (
-      !current &&
-      !pendingFor(bot, input.channelId, key).length &&
-      keptKeys(bot, input.at) >= MAX_KEYS
-    ) {
+    if (overKeyCap(bot, input.channelId, key, input.at, MAX_KEYS)) {
       this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
       return null
     }

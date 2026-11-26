@@ -62,3 +62,14 @@ it('keeps a new record through two removals in a row', async () => {
     expect(JSON.parse(readFileSync(file(), 'utf8')).threads).toEqual(['T1:C1:3.0:U0BOT:c'])
   )
 })
+
+it('writes many threads joined at once in one go', async () => {
+  const writes = vi.spyOn(BotStateFile.prototype, 'write')
+  const record = new SlackLocalParticipations(() => true).of('b1')
+  for (let i = 0; i < 50; i++) {
+    record.add(`T1:C1:${i}.0:U0BOT:c`)
+  }
+  await vi.waitFor(() => expect(JSON.parse(readFileSync(file(), 'utf8')).threads).toHaveLength(50))
+  expect(writes).toHaveBeenCalledTimes(1)
+  writes.mockRestore()
+})

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time: run folder, throwaway CA + 127.0.0.1 cert, and a loopback-only network namespace holder.
 set -eu; source "$(dirname "$0")/env.sh"
+mkdir -p $R && touch $R/.orca-e2e-run
 mkdir -p $R/tls $R/logs $R/fake $R/srv/home $R/srv/run $R/srv/data $R/desk/home $R/desk/run $R/cli/home $R/cli/data
 chmod 700 $R/srv/run $R/desk/run
 # The bot's agent: the claude CLI on PATH (E2E_CLAUDE), talking only to the fake Anthropic API.

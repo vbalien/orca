@@ -308,4 +308,27 @@ it('puts the reason and the channel-message note in an automation run’s prompt
     } as never)
   ).rejects.toThrow('could not be read')
   expect(await open()).toBe(true)
+  // Taken by the session only after local midnight: held until then, and counted on the new day.
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 10, 26, 23, 59, 50) })
+  let take: () => void = () => {}
+  const slow = createBotAutomationDispatcher(
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: only the bot's Chat is used here.
+    {
+      sendToChat: () => new Promise((resolve) => (take = () => resolve({ sessionId: 'chat-2' })))
+    } as unknown as Parameters<typeof createBotAutomationDispatcher>[0],
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: no turn is watched to its end here.
+    {
+      watch: async () => ({ dispose: () => {}, ended: new Promise(() => {}) }),
+      deliver: async () => ({}),
+      couldNotStart: () => {}
+    } as unknown as Parameters<typeof createBotAutomationDispatcher>[1]
+  )
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the launcher's input as the run service gives it.
+  void slow({ automation, run: await reserveRun('t3'), target } as never).catch(() => {})
+  await vi.waitFor(async () => expect((await counts.pendingStatus('b1')).pending).toBe(1))
+  vi.setSystemTime(new Date(2026, 10, 27, 0, 0, 10))
+  take()
+  await vi.waitFor(async () => expect((await counts.pendingStatus('b1')).pending).toBe(0))
+  expect(await open()).toBe(false)
+  vi.useRealTimers()
 })

@@ -85,10 +85,21 @@ export class SlackLocalParticipation {
       this.threads.delete(oldest)
     }
     this.seenInSlack.delete(externalId)
-    // Written once the file was read, so what an earlier run recorded is kept.
-    void this.load().then(() =>
-      this.file.write(() => ({ v: 1, threads: [...this.threads.keys()] }))
-    )
+    this.save()
+  }
+
+  // One write for any number of adds before it starts (it writes them all), once the file was read,
+  // so what an earlier run recorded is kept.
+  private saving = false
+  private save(): void {
+    if (this.saving) {
+      return
+    }
+    this.saving = true
+    void this.load().then(() => {
+      this.saving = false
+      return this.file.write(() => ({ v: 1, threads: [...this.threads.keys()] }))
+    })
   }
 
   /** An @mention is being delivered into a thread the bot hasn't joined: notices that come meanwhile
