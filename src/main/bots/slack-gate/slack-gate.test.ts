@@ -60,10 +60,32 @@ afterEach(() => {
 })
 
 describe('slackGateApplies', () => {
-  it('applies to a selected case, to any message riding the turn, and conservatively to unknown mentions', () => {
+  it('applies to a selected case, to any message riding the turn, and to an unknown mention only when both cases are', () => {
     const bot = { slackGate: command({ appliesTo: ['mention'] }) }
     expect(slackGateApplies(bot, { case: 'thread_reply' })).toBe(false)
-    expect(slackGateApplies(bot, { case: 'thread_reply', mentionUnknown: true })).toBe(true)
+    for (const [appliesTo, checked] of [
+      [['thread_reply'], false],
+      [['mention'], false],
+      [['mention', 'thread_reply'], true]
+    ] as const) {
+      const gated = { slackGate: command({ appliesTo: [...appliesTo] }) }
+      for (const unknown of ['thread_reply', 'mention'] as const) {
+        expect(slackGateApplies(gated, { case: unknown, mentionUnknown: true })).toBe(checked)
+        expect(
+          slackGateApplies(gated, {
+            case: 'dm',
+            later: [{ case: unknown, mentionUnknown: true, text: 'x' }]
+          })
+        ).toBe(checked)
+      }
+    }
+    // A known reply riding with an unknown one still selects the turn.
+    expect(
+      slackGateApplies(
+        { slackGate: command({ appliesTo: ['thread_reply'] }) },
+        { case: 'thread_reply', later: [{ case: 'mention', mentionUnknown: true, text: 'x' }] }
+      )
+    ).toBe(true)
     expect(
       slackGateApplies(bot, { case: 'thread_reply', later: [{ case: 'mention', text: 'x' }] })
     ).toBe(true)

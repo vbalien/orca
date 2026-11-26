@@ -164,7 +164,7 @@ export function BotSlackGateRulesEditor(props: {
             <li>
               {t(
                 'bots.slack.gate.rules.helpMentions',
-                'The default rules suit replies in a thread; mentions wake without a check. Through Orca Cloud, a mention in a thread the bot has no chat in can’t be told from a reply and is checked, and a very short one can read as not meant for the bot.'
+                'The default rules suit replies in a thread; mentions wake without a check. A message Orca Cloud can’t tell from a reply (the first one in a thread the bot has no chat in) is checked only when both mentions and replies are. If you check mentions, a very short one can read as not meant for the bot.'
               )}
             </li>
             <li>
