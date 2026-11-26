@@ -141,14 +141,6 @@ export function slackGateRulesBytes(config: SlackGateRulesConfig): number {
   return new TextEncoder().encode(JSON.stringify(canonicalSlackGateRules(config))).length
 }
 
-/** The question a rule names. */
-export function slackGateQuestionNamed(
-  config: SlackGateRulesConfig,
-  name: string
-): SlackGateQuestion | undefined {
-  return config.questions.find((question) => question.name === name)
-}
-
 /** How many earlier messages a config sends: 0 when none (left out or a limit of 0), Infinity for all. */
 export function slackGateEarlierLimit(config: SlackGateRulesConfig): number {
   const limit = slackGateRulesSends(config).get('earlierMessages')

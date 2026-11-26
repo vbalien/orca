@@ -156,7 +156,10 @@ function countValues(value: unknown): number {
     const next = stack.pop()
     count++
     if (typeof next === 'object' && next !== null) {
-      stack.push(...(Array.isArray(next) ? next : Object.values(next)))
+      // One at a time: spreading a long list into push() would pass the engine's argument limit.
+      for (const child of Array.isArray(next) ? next : Object.values(next)) {
+        stack.push(child)
+      }
     }
   }
   return count

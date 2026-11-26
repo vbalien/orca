@@ -1,7 +1,7 @@
 // `bots.slackGate.*`: a bot's Slack wake gate. Only the owner changes it, never an agent's CLI; a
 // paired device may tune it and set its keys, but never choose its command. Nothing returns a key.
 import { slackGateCommandChanged, type BotSlackGate } from '../../../../shared/bots/bot-slack-gate'
-import { validateSlackGateRules } from '../../../../shared/bots/slack-gate-rules-validate'
+import { canonicalSlackGateRules } from '../../../../shared/bots/slack-gate-rules-config'
 import {
   SlackGateBot,
   SlackGateSet,
@@ -43,13 +43,9 @@ export async function forgetSlackGateKey(botId: string): Promise<void> {
   }
 }
 
-/** An OpenAI gate is kept in its canonical form (the schema already checked it). */
+/** An OpenAI gate is kept in its canonical form (the params schema already checked it). */
 function slackGateToStore(gate: BotSlackGate | null): BotSlackGate | null {
-  if (gate?.kind !== 'openai') {
-    return gate
-  }
-  const checked = validateSlackGateRules(gate.openai)
-  return checked.ok ? { ...gate, openai: checked.config } : gate
+  return gate?.kind === 'openai' ? { ...gate, openai: canonicalSlackGateRules(gate.openai) } : gate
 }
 
 const setGate = defineMethod({
