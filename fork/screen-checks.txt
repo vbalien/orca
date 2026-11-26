@@ -12,3 +12,5 @@
      그 서버를 환경으로 추가한 격리 데스크톱): 서버의 봇 → Connectors → Slack → "깨우기 전에 확인"의 OpenAI API key에 시험 키를 넣고 Save key → "Saved", 입력 칸이 빈다.
      Remove → "Not saved". 서버 프로필의 bot-slack-gate-keys/openai/에 파일이 생겼다 사라진다. 명령으로 바꿔 저장하면 "Change a Slack gate command in Orca on this computer."로 거부된다.
      (Slack 카드는 Orca Cloud가 Slack 설치 상태를 답해야 보인다. 격리 환경에는 Cloud가 없으므로 그 답 하나만 클라이언트 쪽에서 대신 준다.)
+  6) 같은 페어링 데스크톱에서 서버 봇 → Connectors → Slack의 연결 선택에 "Use my own Slack app"이 있다. 그것을 누르면 서버 봇의 내 Slack 앱 설정(토큰 칸)이 보인다
+     (토큰은 넣지 않는다). 서버 쪽 bots.slackLocal.status가 mode local로 바뀐다.
