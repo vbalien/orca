@@ -1,4 +1,4 @@
-// The choice between Orca Cloud's Slack app and the bot's own app on this computer.
+// The choice between Orca Cloud's Slack app and the bot's own app on its computer.
 import React from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -6,15 +6,18 @@ import { useTranslate } from '@/i18n/use-translate'
 import type { Bot } from '../../../../../shared/bot-types'
 import { useBotSlackLocal } from './use-bot-slack-local'
 import { slackLocalErrorText } from './slack-local-error-text'
+import { useBotAccessPlace } from '../use-bot-access-place'
 
 /** In an installed Orca Cloud workspace's body: which app it is, and how to change it. */
-export function BotSlackConnectionLine(): React.JSX.Element {
+export function BotSlackConnectionLine({ bot }: { bot: Bot }): React.JSX.Element {
   const t = useTranslate()
+  const { computer } = useBotAccessPlace(bot.hostId)
   return (
     <p className="mt-3 text-xs leading-5 text-muted-foreground">
       {t(
         'bots.slackLocal.connection.orca',
-        'Connected through Orca Cloud’s Slack app. To use your own Slack app on this computer instead, remove this one first, then add Slack again.'
+        'Connected through Orca Cloud’s Slack app. To use your own Slack app on {{computer}} instead, remove this one first, then add Slack again.',
+        { computer }
       )}
     </p>
   )
@@ -29,6 +32,7 @@ export function BotSlackUseOwnApp({
   onDone: () => void
 }): React.JSX.Element {
   const t = useTranslate()
+  const { computer } = useBotAccessPlace(bot.hostId)
   const local = useBotSlackLocal(bot)
   const choose = async (): Promise<void> => {
     if (await local.switchToLocal()) {
@@ -49,7 +53,8 @@ export function BotSlackUseOwnApp({
       <p className="text-xs leading-5 text-muted-foreground">
         {t(
           'bots.slackLocal.choose.help',
-          'Or use a Slack app you make yourself. This computer talks to it directly, so messages don’t go through Orca Cloud.'
+          'Or use a Slack app you make yourself. Orca on {{computer}} talks to it directly, so messages don’t go through Orca Cloud.',
+          { computer }
         )}
       </p>
       <Button
@@ -62,7 +67,7 @@ export function BotSlackUseOwnApp({
         {t('bots.slackLocal.choose.button', 'Use my own Slack app')}
       </Button>
       {local.error ? (
-        <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error)}</p>
+        <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error, computer)}</p>
       ) : null}
     </div>
   )

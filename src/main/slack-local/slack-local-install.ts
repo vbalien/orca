@@ -1,4 +1,5 @@
-// The desktop's local Slack service, beside its Orca Cloud connector but independent of sign-in.
+// The local Slack service of an Electron host (desktop or `orca serve`), beside its Orca Cloud connector
+// but independent of sign-in.
 import { join } from 'node:path'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { Store } from '../persistence/loading-store/store'

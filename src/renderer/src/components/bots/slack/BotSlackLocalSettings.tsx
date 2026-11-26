@@ -1,4 +1,4 @@
-// A bot's own Slack app on this computer: its tokens (write-only), the owner and the people who may
+// A bot's own Slack app on its computer: its tokens (write-only), the owner and the people who may
 // ask, the manifest to create the app with, and the way back to Orca Cloud's app.
 import React, { useId, useState } from 'react'
 import { toast } from 'sonner'
@@ -17,6 +17,7 @@ import type { useBotSlackLocal } from './use-bot-slack-local'
 import { BotSlackGateCard } from './BotSlackGateCard'
 import { BotSlackStrayCloudApp } from './BotSlackStrayCloudApp'
 import { slackLocalErrorText } from './slack-local-error-text'
+import { useBotAccessPlace } from '../use-bot-access-place'
 
 const MEMBER_ID = /^[A-Z0-9]{2,32}$/
 
@@ -30,7 +31,13 @@ function memberIds(text: string): string[] | null {
   return ids.length > 0 && ids.every((id) => MEMBER_ID.test(id)) ? ids : null
 }
 
-function TokenFields({ local }: { local: SlackLocal }): React.JSX.Element {
+function TokenFields({
+  local,
+  computer
+}: {
+  local: SlackLocal
+  computer: string
+}): React.JSX.Element {
   const t = useTranslate()
   const botId = useId()
   const appId = useId()
@@ -62,7 +69,8 @@ function TokenFields({ local }: { local: SlackLocal }): React.JSX.Element {
         <p className="text-xs text-destructive">
           {t(
             'bots.slackLocal.tokens.noKeyringNotSaved',
-            "This computer has no OS keyring to seal Slack tokens with, so they can't be saved here. Nothing was saved."
+            "Slack tokens can't be saved: {{computer}} has no OS keyring to seal them with. Nothing was saved.",
+            { computer }
           )}
         </p>
       ) : null}
@@ -232,6 +240,7 @@ export function BotSlackLocalSettings({
   local: SlackLocal
 }): React.JSX.Element {
   const t = useTranslate()
+  const { computer } = useBotAccessPlace(bot.hostId)
   const teamId = local.status?.teamId
   const copyManifest = (): void => {
     void navigator.clipboard.writeText(slackLocalManifest(bot.name)).then(
@@ -245,7 +254,8 @@ export function BotSlackLocalSettings({
         <p className="mb-2 text-xs leading-5 text-muted-foreground">
           {t(
             'bots.slackLocal.app.help',
-            'Create an app at api.slack.com/apps from this manifest, install it to your workspace, then paste its two tokens below. Slack messages go straight between Slack and this computer.'
+            'Create an app at api.slack.com/apps from this manifest, install it to your workspace, then paste its two tokens below. Slack messages go straight between Slack and {{computer}}.',
+            { computer }
           )}
         </p>
         <ol className="mb-2 list-decimal space-y-1 pl-5 text-xs leading-5 text-muted-foreground">
@@ -268,7 +278,7 @@ export function BotSlackLocalSettings({
         </Button>
       </BotConnectorSection>
       <BotConnectorSection title={t('bots.slackLocal.tokens.title', 'Tokens')}>
-        <TokenFields local={local} />
+        <TokenFields local={local} computer={computer} />
       </BotConnectorSection>
       {teamId ? (
         <BotConnectorSection title={t('bots.slackLocal.access.title', 'Who can ask')}>
@@ -304,7 +314,7 @@ export function BotSlackLocalSettings({
         </p>
       ) : null}
       {local.error ? (
-        <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error)}</p>
+        <p className="text-xs text-destructive">{slackLocalErrorText(t, local.error, computer)}</p>
       ) : null}
       <BotSlackStrayCloudApp bot={bot} />
       {/* The same "Check before waking" gate as on Orca Cloud's app: it runs after Who can ask. */}

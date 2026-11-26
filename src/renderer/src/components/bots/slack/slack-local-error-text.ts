@@ -2,7 +2,12 @@
 import type { useTranslate } from '@/i18n/use-translate'
 import { readSlackLocalError } from '../../../../../shared/bots/slack-local-errors'
 
-export function slackLocalErrorText(t: ReturnType<typeof useTranslate>, message: string): string {
+/** `computer`: the bot's computer as this window names it (useBotAccessPlace). */
+export function slackLocalErrorText(
+  t: ReturnType<typeof useTranslate>,
+  message: string,
+  computer: string
+): string {
   const error = readSlackLocalError(message)
   const code = error?.detail ?? 'network'
   switch (error?.code) {
@@ -21,7 +26,8 @@ export function slackLocalErrorText(t: ReturnType<typeof useTranslate>, message:
     case 'no_keyring':
       return t(
         'bots.slackLocal.errors.noKeyring',
-        'This computer has no OS keyring to seal Slack tokens with, so they were not saved.'
+        'Slack tokens were not saved: {{computer}} has no OS keyring to seal them with.',
+        { computer }
       )
     case 'bot_token_format':
       return t(

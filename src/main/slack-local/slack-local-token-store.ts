@@ -42,7 +42,7 @@ export class SlackLocalTokenStore {
     if (!secrets || !secrets.isEncryptionAvailable() || sealing?.kind !== 'os-keychain') {
       return sealing?.kind === 'none'
         ? sealing.reason
-        : 'This computer has no OS keyring to seal Slack tokens with.'
+        : "The bot's computer has no OS keyring to seal Slack tokens with."
     }
     return null
   }

@@ -42,7 +42,7 @@ export function BotSlackSection({
             )}
           />
         </p>
-        <BotSlackConnectionLine />
+        <BotSlackConnectionLine bot={bot} />
       </BotConnectorSection>
       <BotWhoCanAskInsetList bot={bot} service={people} />
       <BotConnectorSection>

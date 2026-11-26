@@ -1,4 +1,4 @@
-// `bots.slackLocal.*`: a bot's own Slack app on this computer. Tokens only ever come in; no answer
+// `bots.slackLocal.*`: a bot's own Slack app on the bot's computer. Tokens only ever come in; no answer
 // carries them back.
 import * as z from 'zod'
 

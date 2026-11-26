@@ -34,10 +34,11 @@ export function installMainProcessConnectorCloud(serve: boolean): void {
     getWorktreeIdForTab: (id) => browserManager.getWorktreeIdForTab(id),
     keyStagingDir: join(userDataPath, 'google-setup-keys')
   })
+  // A bot's own Slack app runs wherever its Electron host does, `orca serve` included.
+  installSlackLocal(runtime, state.store, userDataPath)
   if (serve) {
     return
   }
-  installSlackLocal(runtime, state.store, userDataPath)
   powerMonitor.on('resume', host.refreshLinearLogins)
   registerGoogleSetupHandlers()
   registerSlackHandOffHandlers(() => runtime.getConnectorCloud())
