@@ -103,6 +103,9 @@ beforeEach(() => {
     })
   })
   setSlackLocalService(service)
+  // Bot change notices are debounced on a timer: controlled from before any request, so the test
+  // runs out every notice the requests queued before it looks at them.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   events = []
   // What paired clients get: `runtime.clientEvents.subscribe` forwards this stream.
   runtime.onClientEvent((event) => events.push(event))
@@ -198,9 +201,9 @@ it('lets a person on a paired computer do every step, and refuses the CLI and a 
   expect(saved()?.slackConnection?.mode).not.toBe('local')
   expect(readdirSync(join(dir, 'slack-local'))).toEqual([])
 
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  // Past the debounce of bot change notices, so a queued event would have gone out.
+  // Past the debounce of bot change notices, so every queued event has gone out.
   await vi.advanceTimersByTimeAsync(2_000)
+  expect(events.some((event) => JSON.stringify(event).includes('botsChanged'))).toBe(true)
   expect(leaks(JSON.stringify([...refused, ...answers]))).toBe(false)
   expect(logged.some(leaks)).toBe(false)
   expect(leaks(JSON.stringify(events))).toBe(false)
@@ -248,8 +251,8 @@ it('says why Slack refused new tokens without passing on what Slack or the netwo
   }
   expect(JSON.stringify(answers)).toContain('unknown_error')
   expect(JSON.stringify(answers)).toContain('network')
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   await vi.advanceTimersByTimeAsync(2_000)
+  expect(events.some((event) => JSON.stringify(event).includes('botsChanged'))).toBe(true)
   expect(leaks(JSON.stringify(answers))).toBe(false)
   expect(logged.some(leaks)).toBe(false)
   expect(leaks(JSON.stringify(events))).toBe(false)
