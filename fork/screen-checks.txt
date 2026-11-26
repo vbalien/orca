@@ -14,3 +14,8 @@
      (Slack 카드는 Orca Cloud가 Slack 설치 상태를 답해야 보인다. 격리 환경에는 Cloud가 없으므로 그 답 하나만 클라이언트 쪽에서 대신 준다.)
   6) 같은 페어링 데스크톱에서 서버 봇 → Connectors → Slack의 연결 선택에 "Use my own Slack app"이 있다. 그것을 누르면 서버 봇의 내 Slack 앱 설정(토큰 칸)이 보인다
      (토큰은 넣지 않는다). 서버 쪽 bots.slackLocal.status가 mode local로 바뀐다.
+  7) 채널 글(1)의 내 Slack 앱 설정 화면에서, 토큰 없이): "깨우기 전에 확인"의 확인할 것에 "Channel messages (your own Slack app)"가 있다. 켜면 규칙 JSON이
+     스레드+채널 기본값(질문 for_the_bot·asks_the_bot, send에 case)으로 바뀌고 알림이 뜬다. 채널 칸에 "abc"를 넣으면 오류 문구가 보이고 저장이 막힌다(칸이
+     aria-invalid). C0123456789를 넣으면 저장되고, 다시 열어도 그대로다. "모든 글이 OpenAI로 간다"는 안내가 보인다. "Rules from a script" 칸이 있고(로컬 호스트는
+     편집 가능, 페어링 화면은 읽기 전용 + "Set in Orca on …"), 값을 넣으면 "확인이 실패하면 깨우지 않는다" 문구가 보인다. ko로 바꿔도 같은 자리가 한국어다(390px 폭에서 줄바꿈만, 가로 넘침 없음).
+

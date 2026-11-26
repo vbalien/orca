@@ -18,7 +18,7 @@ export type TuneCase = {
   expect: 'wake' | 'block'
   botName?: string
   event: {
-    case?: 'thread_reply' | 'mention' | 'dm'
+    case?: 'thread_reply' | 'mention' | 'dm' | 'channel_message' | 'trigger'
     message: string
     earlier?: { from: Speaker; text: string }[]
     /** Earlier messages came before these, as the app marks when it shows only the last few. */
@@ -68,9 +68,11 @@ function readCase(value: unknown): TuneCase | string {
     gateCase !== undefined &&
     gateCase !== 'thread_reply' &&
     gateCase !== 'mention' &&
-    gateCase !== 'dm'
+    gateCase !== 'dm' &&
+    gateCase !== 'channel_message' &&
+    gateCase !== 'trigger'
   ) {
-    return 'event.case: thread_reply, mention or dm'
+    return 'event.case: thread_reply, mention, dm, channel_message or trigger'
   }
   if (!isText(event.message)) {
     return 'event.message: needs text'

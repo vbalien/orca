@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Inside the namespace, after boot.sh: the channel-message scenarios before a rules script is set. Each step prints the Decisions calls,
+# Slack posts and agent turns (fake Anthropic requests) since it began, and where a post went.
+set -u; source "$(dirname "$0")/lib.sh"
+echo "== channel gate (channel default rules), paired person"; gate channel
+step "1 allowed channel, top-level [wake]" 12 "$(top '[wake] does anyone know where the release notes live?')"; T1=$(cat $R/last-ts); cp $R/last-ts $R/t1
+echo "   reply went to the message's own thread: $(lastpost | grep -c "thread $T1")"; echo "   agent told it was a channel message: $(told 'was not addressed to you')"
+step "2 allowed channel, top-level [chat]" 8 "$(top '[chat] lunch at noon?')"; T2=$(cat $R/last-ts)
+step "3 channel not in the list, [wake]" 8 "$(top '[wake] anyone around?' U0ASKER1 C0OTHER1)"
+step "4 someone not allowed to ask (U0STRANGE), [wake]" 8 "$(top '[wake] can someone help?' U0STRANGE)"
+step "5 [unsure] (unsure never wakes a channel message)" 8 "$(top '[unsure] hmm')"
+step "6 OpenAI 503 (onError wake, but channel messages never wake on a failed check)" 8 "$(top '[5xx] question')"
+step "7 reply in a people-only thread (bot not in it), [wake]" 12 "$(reply $T2 '[wake] could the bot check the build?')"
+echo "   checked as: $(lastcase)"
+step "8 top-level [wake] the agent answers NO_REPLY" 12 "$(top '[wake] [quiet] who has the projector?')"; T8=$(cat $R/last-ts)
+step "8b reply in that quiet thread, [chat] (still a channel message)" 8 "$(reply $T8 '[chat] found it')"; echo "   checked as: $(lastcase)"
+step "9 reply in thread 1 the bot answered, [chat] (now a thread reply)" 8 "$(reply $T1 '[chat] thanks!')"; echo "   checked as: $(lastcase)"
+step "10 mention in quiet thread 8" 12 "{\"user\":\"U0ASKER1\",\"text\":\"[chat] are you there?\",\"channel\":\"C0CHAN01\",\"thread_ts\":\"$T8\"}"
+
+echo "== limits: banter at most 1 a day"; gate day
+step "11 [banter]" 12 "$(top '[banter] anyone else think fridays should be shorter?')"; echo "   agent told the reason: $(told 'banter: join briefly')"
+step "12 [banter] again (daily limit used)" 8 "$(top '[banter] coffee or tea?')"
+echo "== limits: banter only, 60 min apart"; gate cooldown
+step "13 [banter] inside the cooldown (all wake rules closed: no OpenAI call)" 8 "$(top '[banter] what a day')"
+echo "== restart the server"; n0=$(count $R/fake/calls.jsonl '"socket":"open"'); touch $R/stop-server; sleep 6; env PATH=$PATH $E/start-server.sh >/dev/null; socket_back $n0; sleep 3
+step "14 [banter] after the restart (cooldown kept)" 8 "$(top '[banter] weekend plans?')"
+echo "== OpenAI answer held while the channel is removed"; gate channel >/dev/null
+p0=$(posts); event "$(top '[hold] is the bot around?')" > /dev/null; sleep 2
+off="{\"botId\":\"$B\",\"gate\":$(python3 -c "import json;g=json.load(open('$R/gates/channel.json'));g.pop('channelMessages');print(json.dumps(g))")}"
+$E/call.sh person bots.slackGate.store "$off" | cut -c1-80; curl -s -X POST $CTL/release; sleep 10
+echo "   held then released after the channel was turned off: slack posts +$(( $(posts) - p0 ))"
+echo "== restart after a quiet answer, and a joined thread after the channel is removed"; gate channel >/dev/null
+step "19 top-level [wake] the agent answers NO_REPLY" 12 "$(top '[wake] [quiet] is the printer fixed?')"; TQ=$(cat $R/last-ts)
+n0=$(count $R/fake/calls.jsonl '"socket":"open"'); touch $R/stop-server; sleep 6; env PATH=$PATH $E/start-server.sh >/dev/null; socket_back $n0; sleep 3
+step "20 after a restart: reply in that quiet thread, [chat]" 8 "$(reply $TQ '[chat] no idea')"; echo "   checked as: $(lastcase)"
+step "21 after a restart: mention in that quiet thread" 12 "{\"user\":\"U0ASKER1\",\"text\":\"[chat] still there?\",\"channel\":\"C0CHAN01\",\"thread_ts\":\"$TQ\"}"
+echo "   the agent's request holds the quiet turn's message (same chat): $(tail -1 $R/fake/anthropic.jsonl | python3 -c "import json,sys;print('is the printer fixed' in json.load(sys.stdin)['all'])")"
+$E/call.sh person bots.slackGate.store "$off" | cut -c1-60
+step "22 channel removed: reply in thread 1 the bot answered before the restart, [wake]" 12 "$(reply $T1 '[wake] and the old notes?')"; echo "   checked as: $(lastcase)"
+echo "   paired person sets a rules script: $(gate script)"
