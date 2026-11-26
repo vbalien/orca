@@ -15,6 +15,7 @@ import {
 } from './slack-local-events'
 import type { LocalSlackThreadMessage } from './slack-local-reads'
 import {
+  gateContextFrom,
   gateContextWanted,
   SlackLocalGateContext,
   type SlackLocalRecentThread,
@@ -213,11 +214,13 @@ export class SlackLocalInbound {
     const deadlineAt = receivedAt + GATE_DEADLINE_MS
     const left = () => deadlineAt - this.now()
     let gateCase: SlackGateCase = message.case
+    // A thread read to tell whether the bot joined serves as the gate's context too, when whole.
+    let threadRead: Awaited<ReturnType<SlackLocalThreadChats['joined']>>['read']
     if (message.case === 'thread_reply' && chat.linked !== 'normal') {
-      gateCase =
-        chat.linked === 'channel' && (await this.chats.joined(message, chat, left()))
-          ? 'thread_reply'
-          : 'channel_message'
+      const joined =
+        chat.linked === 'channel' ? await this.chats.joined(message, chat, left()) : null
+      threadRead = joined?.read
+      gateCase = joined?.joined ? 'thread_reply' : 'channel_message'
     }
     const channelMessage = gateCase === 'channel_message'
     if (channelMessage && (left() <= 0 || !this.chats.channelTaken(bot, message))) {
@@ -255,9 +258,11 @@ export class SlackLocalInbound {
       : 0
     const reader = channelMessage ? this.channelReads : this.gateContext
     const gateContext =
-      wanted > 0
-        ? await reader?.read(message, wanted, channelMessage ? left() : undefined)
-        : undefined
+      wanted <= 0
+        ? undefined
+        : threadRead?.complete
+          ? gateContextFrom(threadRead.messages, message, wanted, this.deps.identity.botUserId)
+          : await reader?.read(message, wanted, channelMessage ? left() : undefined)
     const event = localSlackGateEvent({
       message,
       asker,

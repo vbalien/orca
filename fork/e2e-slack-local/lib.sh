@@ -7,15 +7,17 @@ asks() { [ -f $R/fake/decisions.jsonl ] && wc -l < $R/fake/decisions.jsonl || ec
 turns() { [ -f $R/fake/anthropic.jsonl ] && wc -l < $R/fake/anthropic.jsonl || echo 0; }
 lastpost() { grep '"api":"chat.postMessage"' $R/fake/calls.jsonl | tail -1 | python3 -c 'import json,sys;p=json.loads(sys.stdin.read() or "{}").get("params",{});print("thread", p.get("thread_ts","-"))'; }
 event() { curl -s -X POST $CTL/event -d "$1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["ts"])'; }
-# step <name> <wait s> <event json>: sends it, waits, prints the counts; the event's ts goes to $R/last-ts.
-# step <name> <wait s> <event json> <expected "decisions/posts">: sends it, waits, prints the counts and
-# records a failure when they differ. The event's ts goes to $R/last-ts.
+# Every Slack write the bot made (posts, edits, reactions, status...): any Web API call but the reads.
+writes() { grep '"api":' $R/fake/calls.jsonl | grep -cvE '"api":"(auth\.test|bots\.info|apps\.connections\.open|users\.info|conversations\.[a-z]+)"' || true; }
+# step <name> <wait s> <event json> <expected "decisions/agent/writes">: sends it, waits, prints the
+# counts and records a failure when they differ. agent is 0 (no agent turn) or + (one or more).
+# The event's ts goes to $R/last-ts.
 step() {
-  local p0=$(posts) a0=$(asks) t0=$(turns)
+  local w0=$(writes) a0=$(asks) t0=$(turns)
   event "$3" > $R/last-ts; sleep "$2"
-  local dp=$(( $(posts) - p0 )) da=$(( $(asks) - a0 ))
-  echo "$1 (ts $(cat $R/last-ts)): decisions +$da, agent turns +$(( $(turns) - t0 )), slack posts +$dp$( [ $dp -gt 0 ] && echo " → $(lastpost)")"
-  check "$1" "$da/$dp" "$4"
+  local dw=$(( $(writes) - w0 )) da=$(( $(asks) - a0 )) dt=$(( $(turns) - t0 ))
+  echo "$1 (ts $(cat $R/last-ts)): decisions +$da, agent turns +$dt, slack writes +$dw$( [ $dw -gt 0 ] && echo " → $(lastpost)")"
+  check "$1" "$da/$( [ $dt -gt 0 ] && echo + || echo 0)/$dw" "$4"
 }
 # check <name> <actual> <expected>: a failure goes to $R/failures (run-all fails on any).
 check() { [ "$2" = "$3" ] || { echo "   FAIL $1: got $2, expected $3"; echo "$1: got $2, expected $3" >> $R/failures; }; }

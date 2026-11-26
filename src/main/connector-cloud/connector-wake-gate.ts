@@ -12,7 +12,11 @@ import {
   slackGateWakeCounts,
   type SlackWakeDecision
 } from '../bots/slack-gate/slack-gate'
-import { holdSlackGateRun, slackGateReasonNote } from '../bots/slack-gate/slack-gate-runs'
+import {
+  holdSlackGateRun,
+  slackGateReasonNote,
+  takeSlackGateRun
+} from '../bots/slack-gate/slack-gate-runs'
 import type { SlackGateWakeCounts } from '../bots/slack-gate/slack-gate-wake-counts'
 import type { ConversationAdmission } from '../external-conversations/external-conversation-host'
 import { refusalOf } from '../external-conversations/external-conversation-chain'
@@ -235,6 +239,7 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
       ...(budget.cut ? { truncated: true as const } : {})
     }
     let reservation: SlackWakeDecision['reservation']
+    let heldRun: string | undefined
     return {
       expired,
       created: (run) => {
@@ -243,7 +248,13 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
         }
         void run
       },
-      failed: () => reservation?.release(),
+      // No run was made: its reason and count go (the count back).
+      failed: () => {
+        if (heldRun) {
+          takeSlackGateRun(heldRun).notStarted()
+        }
+        reservation?.release()
+      },
       reserve: async () => {
         if (expired()) {
           return { refused: true }
@@ -270,6 +281,7 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
           // The reason (rules' or script's, either may quote the message) lives in memory until the
           // run's prompt is made, never in its record.
           const reason = decision.wakeReason
+          heldRun = runId
           holdSlackGateRun(runId, {
             automationId: delivery.automationId,
             ...(reason ? { note: slackGateReasonNote(reason) } : {}),

@@ -28123,6 +28123,7 @@
         "rulesCommandSaved": "used the saved rules",
         "rulesCommandDecided": "decided itself",
         "limitsHeld": "The wake counts file could not be read: limited rules wake nothing until {{at}}.",
+        "copyNotKept": "Orca could not keep a copy of these settings for older Orca versions: if one saves this bot, Restore can’t bring them back.",
         "limitsHeldReplacing": "The wake counts file could not be read: limited rules wake nothing until it is replaced.",
         "failsClosed": "With a rules script or limits, a check that fails never wakes the bot, whatever “If the check fails” says.",
         "restore": "Restore settings an older Orca dropped"

@@ -142,17 +142,7 @@ export class SlackLocalGateContext {
       if (!read.complete) {
         return [{ kind: 'unreadable', text: '' }]
       }
-      const before = read.messages.filter((entry) => Number(entry.ts) < Number(message.ts))
-      const kept = before
-        .slice(-limit)
-        .map((entry): GateContextItem =>
-          entry.userId === this.deps.botUserId
-            ? { kind: 'self', text: entry.text }
-            : entry.botId
-              ? { kind: 'bot', text: entry.text }
-              : { kind: 'earlier', text: entry.text }
-        )
-      return before.length > kept.length ? [{ kind: 'more', text: '' }, ...kept] : kept
+      return gateContextFrom(read.messages, message, limit, this.deps.botUserId)
     } catch (error) {
       if (error instanceof SlackApiError && error.retryAfterMs !== undefined) {
         this.pause.until = (this.deps.now?.() ?? Date.now()) + error.retryAfterMs
@@ -164,4 +154,25 @@ export class SlackLocalGateContext {
       this.reading -= 1
     }
   }
+}
+
+/** The gate's context from a whole read of the thread: the last `limit` messages before this one,
+ *  oldest first; `self` marks the bot's own. */
+export function gateContextFrom(
+  messages: LocalSlackThreadMessage[],
+  message: Pick<LocalSlackMessage, 'ts'>,
+  limit: number,
+  botUserId: string
+): GateContextItem[] {
+  const before = messages.filter((entry) => Number(entry.ts) < Number(message.ts))
+  const kept = before
+    .slice(-limit)
+    .map((entry): GateContextItem =>
+      entry.userId === botUserId
+        ? { kind: 'self', text: entry.text }
+        : entry.botId
+          ? { kind: 'bot', text: entry.text }
+          : { kind: 'earlier', text: entry.text }
+    )
+  return before.length > kept.length ? [{ kind: 'more', text: '' }, ...kept] : kept
 }

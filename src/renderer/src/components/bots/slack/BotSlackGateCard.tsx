@@ -30,7 +30,14 @@ import {
   formatSlackGateRulesText,
   parseSlackGateRulesText
 } from '../../../../../shared/bots/slack-gate-rules-text'
-import { channelIdsOf, draftOf, gateOf, knownGate, type SlackGateDraft } from './slack-gate-draft'
+import {
+  channelIdsOf,
+  draftOf,
+  gateOf,
+  knownGate,
+  saveGate,
+  type SlackGateDraft
+} from './slack-gate-draft'
 import { BotSlackGateKeyField } from './BotSlackGateKeyField'
 import { BotSlackGateScriptField, LimitsHeld } from './BotSlackGateScriptField'
 import { BotSlackGateChannelField } from './BotSlackGateChannelField'
@@ -45,29 +52,11 @@ import {
   SLACK_GATE_CHANNEL_DEFAULT_RULES,
   SLACK_GATE_DEFAULT_RULES
 } from '../../../../../shared/bots/slack-gate-default-rules'
-import { callSlackGateHost, saveSlackGate, SlackGateHostTooOldError } from './rules/slack-gate-save'
+import { callSlackGateHost, SlackGateHostTooOldError } from './rules/slack-gate-save'
 import { useBotAccessPlace } from '../use-bot-access-place'
 import type { SlackGateKeyStatus } from '../../../../../shared/rpc-contract/bots-slack-gate-params'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
 import { BotConnectorSection } from '../bot-connector-people'
-
-/** Saves the gate (null removes it) on the bot's host, then reads its bots again. */
-async function saveGate(
-  bot: Bot,
-  gate: BotSlackGateEdit | null,
-  hostHasFeatures: boolean
-): Promise<void> {
-  try {
-    await saveSlackGate(
-      (method, params) => callBotRpc(bot, method, params),
-      bot.id,
-      gate,
-      hostHasFeatures
-    )
-  } finally {
-    await refreshBotHost(bot.hostId)
-  }
-}
 
 const CASE_LABELS: Record<SlackGateSettingCase, [string, string]> = {
   mention: ['bots.slack.gate.case.mention', 'Mentions'],
@@ -131,9 +120,17 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const save = (next: BotSlackGateEdit | null) => {
     setSaving(true)
     void saveGate(bot, next, hostHasFeatures).then(
-      () => {
+      (copyKept) => {
         setSaving(false)
         toast.success(t('bots.slack.gate.saved', 'Gate saved.'))
+        if (!copyKept) {
+          toast.warning(
+            t(
+              'bots.slack.gate.copyNotKept',
+              'Orca could not keep a copy of these settings for older Orca versions: if one saves this bot, Restore can’t bring them back.'
+            )
+          )
+        }
       },
       (error: unknown) => {
         setSaving(false)

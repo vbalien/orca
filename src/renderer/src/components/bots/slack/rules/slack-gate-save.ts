@@ -73,11 +73,16 @@ export function slackGateSaveMethod(
   return gate?.kind === 'openai' ? 'bots.slackGate.save' : 'bots.slackGate.set'
 }
 
+/** Saves it; false when the host saved it but could not keep its copy for older builds. */
 export async function saveSlackGate(
   call: SlackGateHostCall,
   botId: string,
   gate: BotSlackGateEdit | null,
   hostHasFeatures: boolean
-): Promise<void> {
-  await callSlackGateHost(call, slackGateSaveMethod(gate, hostHasFeatures), { botId, gate })
+): Promise<boolean> {
+  const saved = await callSlackGateHost(call, slackGateSaveMethod(gate, hostHasFeatures), {
+    botId,
+    gate
+  })
+  return !(typeof saved === 'object' && saved !== null && 'copyKept' in saved && !saved.copyKept)
 }

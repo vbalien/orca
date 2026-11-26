@@ -287,6 +287,16 @@ it('treats an Orca Cloud slack.message event like a channel message: a failed or
     trigger: { automationId: 'a1', triggerId: 'r1', event: 'message' }
   })
   const triggers = gate({ appliesTo: ['trigger'], channelMessages: undefined })
+  // OpenAI is asked about it as a channel message, so the channel questions judge it.
+  const cases: string[] = []
+  const asking = decider({
+    askOpenAI: async (input) => {
+      cases.push(input.event.case)
+      return { kind: 'answers', answers: { asks: predicate(0.9) } }
+    }
+  })
+  expect((await asking.decider.decide(bot(triggers), message)).verdict).toBe('wake')
+  expect(cases).toEqual(['channel_message'])
   const failing = decider({
     askOpenAI: async () => ({ kind: 'error', error: 'OpenAI answered 503' })
   })
@@ -329,4 +339,24 @@ it('tells before any read when every way to wake is used up, never rolling chanc
     false
   )
   expect(random).not.toHaveBeenCalled()
+})
+
+it('gives back the count of a verdict that came after the gate gave up on it', async () => {
+  vi.useFakeTimers()
+  let answer: (value: {
+    kind: 'answers'
+    answers: Record<string, SlackGateAnswer>
+  }) => void = () => {}
+  // A runner that ignores its stop: the gate gives up two seconds after the timeout.
+  const slow = decider({ askOpenAI: () => new Promise((resolve) => (answer = resolve)) })
+  const deciding = slow.decider.decide(bot(gate({ openai: limited, timeoutSeconds: 1 })), channel())
+  await vi.advanceTimersByTimeAsync(3500)
+  expect(await deciding).toMatchObject({ verdict: 'block', reason: 'error' })
+  answer({ kind: 'answers', answers: { asks: predicate(0.1), banter: predicate(0.95) } })
+  vi.useRealTimers()
+  await vi.waitFor(async () => {
+    const loaded = await counts.load('b1', 0)
+    expect((await counts.pendingStatus('b1')).pending).toBe(0)
+    expect(counts.open(loaded, 'C1', 'banter', { perDay: 1 }, Date.now())).toBe(true)
+  })
 })

@@ -36,7 +36,8 @@ export type SlackLocalRepliesDeps = {
   /** Which channel-message threads (`:c`) the bot joined: before it has, their notices stay off Slack. */
   participation?: SlackLocalParticipation
   /** Whether a conversation is still its thread's chat for this bot; checked before every post. */
-  canPost?: (externalId: string) => boolean
+  /** Whether this chat (its pane) still holds the thread, right before each post. */
+  canPost?: (externalId: string, paneKey: string) => boolean
 }
 
 const sleepFor = (ms: number, signal: AbortSignal): Promise<void> => wait(ms, undefined, { signal })
@@ -89,33 +90,33 @@ export class SlackLocalReplies {
     }
     // Words are an answer and go; a failure line is a notice (see `notice`).
     await (words
-      ? this.post(event.conversation.externalId, splitAnswer(text))
-      : this.notice(event.conversation.externalId, [text]))
+      ? this.post(event.conversation.externalId, event.paneKey, splitAnswer(text))
+      : this.notice(event.conversation.externalId, event.paneKey, [text]))
   }
 
   private async prompt(event: Prompt): Promise<void> {
     if (!this.notices.add(`${event.conversation.externalId}:${event.prompt.promptId}`)) {
       return
     }
-    await this.notice(event.conversation.externalId, [PROMPT_NOTICE])
+    await this.notice(event.conversation.externalId, event.paneKey, [PROMPT_NOTICE])
   }
 
   /** A failure line or "needs an answer in Orca": in a thread a channel message opened, only once the
    *  bot joined it (an @mention on its way decides), so a look it was never asked for leaves no trace. */
-  private async notice(externalId: string, parts: string[]): Promise<void> {
+  private async notice(externalId: string, paneKey: string, parts: string[]): Promise<void> {
     const participation = this.deps.participation
     const place = parseLocalSlackConversation(externalId)
     if (!place?.channel || !participation) {
-      return place?.channel ? undefined : this.post(externalId, parts)
+      return place?.channel ? undefined : this.post(externalId, paneKey, parts)
     }
     await participation.load()
     if (participation.has(externalId)) {
-      return this.post(externalId, parts)
+      return this.post(externalId, paneKey, parts)
     }
-    participation.deferWhileMention(externalId, () => void this.post(externalId, parts))
+    participation.deferWhileMention(externalId, () => void this.post(externalId, paneKey, parts))
   }
 
-  private async post(externalId: string, parts: string[]): Promise<void> {
+  private async post(externalId: string, paneKey: string, parts: string[]): Promise<void> {
     const place = parseLocalSlackConversation(externalId)
     if (!place || this.pending >= MAX_PENDING) {
       this.deps.onError(place ? 'reply_dropped' : 'reply_unplaceable')
@@ -126,7 +127,7 @@ export class SlackLocalReplies {
     const run = this.tail.then(async () => {
       try {
         for (const part of parts) {
-          if (!(await this.postPart(place, part, externalId))) {
+          if (!(await this.postPart(place, part, externalId, paneKey))) {
             return
           }
           // The bot has now spoken in the thread: a channel-message thread is joined.
@@ -147,7 +148,8 @@ export class SlackLocalReplies {
   private async postPart(
     place: NonNullable<ReturnType<typeof parseLocalSlackConversation>>,
     text: string,
-    externalId: string
+    externalId: string,
+    paneKey: string
   ): Promise<boolean> {
     // markdown_text where Slack takes it; plain text once if it refuses the field.
     let field: 'markdown_text' | 'text' = 'markdown_text'
@@ -166,7 +168,7 @@ export class SlackLocalReplies {
       }
       // A chat that is no longer its thread's (its link went, or an ordinary chat took the thread) posts
       // nothing more, even mid-retry.
-      if (this.deps.canPost && !this.deps.canPost(externalId)) {
+      if (this.deps.canPost && !this.deps.canPost(externalId, paneKey)) {
         console.warn('[slack-local] dropped an answer: its chat is no longer the thread’s')
         return false
       }

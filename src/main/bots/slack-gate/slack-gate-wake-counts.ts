@@ -126,6 +126,12 @@ export class SlackGateWakeCounts {
     }
     const key = slackGateWakeKey(question)
     const entry = bot.keys.get(channelId)?.get(key)
+    // The clock went back past the last wake: that wake counts as now, so a cooldown runs from here
+    // instead of waiting for the clock to catch up (plan "날짜 역행").
+    if (entry && entry.lastAt > at) {
+      entry.lastAt = at
+      void bot.file.write(() => serializeCounts(bot, this.deps.now()))
+    }
     const pending = pendingFor(bot, channelId, key)
     if (!entry && keptKeys(bot, at) >= MAX_KEYS) {
       this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
@@ -140,8 +146,7 @@ export class SlackGateWakeCounts {
       if (pending.length > 0) {
         return false
       }
-      const lastAt = Math.min(entry?.lastAt ?? 0, at)
-      if (entry && at - lastAt < limit.cooldownMinutes * 60_000) {
+      if (entry && at - entry.lastAt < limit.cooldownMinutes * 60_000) {
         return false
       }
     }

@@ -1,9 +1,8 @@
 // What a build from before channel messages, rules scripts and limits makes of a gate this build stores:
-// read with that build's own schema, rules checker and verdict (its files as git has them, imported as
-// they are), the gate survives and every checked message is blocked, valid answers and errors alike; a
+// read with that build's own schema, rules checker and verdict (its files kept word for word in
+// __fixtures__, imported as they are), the gate survives and every checked message is blocked, valid answers and errors alike; a
 // note only drops out; and a chat a channel message opened is not a conversation it can read.
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { effectiveSlackGate, type BotSlackGateEdit } from './bot-slack-gate'
@@ -15,8 +14,9 @@ import {
   parseLocalSlackConversation
 } from '../connectors/local-slack-conversation'
 
-// The release before this change (fork-v1.4.278-1); its files are imported, not copied by hand.
-const BASE = '0c7981d43ef'
+// The release before this change (fork-v1.4.278-1, 0c7981d43ef); its files as that build has them.
+const BASE = 'fork-v1.4.278-1'
+const FIXTURES = join(__dirname, '__fixtures__', `gate-${BASE}`)
 const OLD_FILES = [
   'src/shared/bots/bot-slack-gate.ts',
   'src/shared/bots/slack-gate-rules-config.ts',
@@ -45,7 +45,7 @@ let old: OldModules
 beforeAll(async () => {
   const root = join(process.cwd(), 'node_modules', '.cache', `old-gate-${BASE}`)
   for (const file of OLD_FILES) {
-    const text = execFileSync('git', ['show', `${BASE}:${file}`], { encoding: 'utf8' })
+    const text = readFileSync(join(FIXTURES, `${file}.txt`), 'utf8')
     mkdirSync(join(root, file, '..'), { recursive: true })
     writeFileSync(join(root, file), text)
   }

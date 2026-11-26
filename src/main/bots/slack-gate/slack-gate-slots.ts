@@ -71,7 +71,17 @@ export class SlackGateSlots {
       (run) => run.outcome,
       (): SlackGateOutcome => ({ kind: 'error', error: 'The gate could not start' })
     )
-    return await Promise.race([outcome, giveUp])
+    const first = await Promise.race([outcome.then((done) => ({ done })), giveUp])
+    if ('done' in first) {
+      return first.done
+    }
+    // Given up on: a verdict that still comes gives back any count it reserved.
+    void outcome.then((late) => {
+      if (late.kind === 'verdict') {
+        late.reservation?.release()
+      }
+    })
+    return first
   }
 
   /** Waits for a running check to hand its slot over; false when stopped first. */

@@ -81,12 +81,17 @@ export class SlackLocalWatch {
 export function canonicalLocalChat(
   store: ExternalConversationLinkStore,
   externalId: string,
-  botId?: string
+  /** The chat whose answer it is: the thread's link must still be its, not a later chat's. */
+  chat?: { botId: string; paneKey: string }
 ): boolean {
   const place = parseLocalSlackConversation(externalId)
   const own = place ? findLink(store, { source: 'slack-local', externalId }) : null
-  // Unlinked, or linked to another bot since: nothing of this chat goes to Slack.
-  if (!place || !own || (botId !== undefined && own.link.bot?.botId !== botId)) {
+  // Unlinked, or linked to another bot or chat since: nothing of this chat goes to Slack.
+  if (
+    !place ||
+    !own ||
+    (chat && (own.link.bot?.botId !== chat.botId || own.link.paneKey !== chat.paneKey))
+  ) {
     return false
   }
   if (!place.channel) {

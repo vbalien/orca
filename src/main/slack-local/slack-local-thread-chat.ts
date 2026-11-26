@@ -6,6 +6,7 @@ import { localSlackConversation } from '../../shared/connectors/local-slack-conv
 import type { ExternalConversationSeam } from '../external-conversations/external-conversation-seam'
 import type { ThreadChat } from './slack-local-delivery'
 import type { LocalSlackMessage } from './slack-local-events'
+import type { LocalSlackThreadMessage } from './slack-local-reads'
 import type { SlackLocalGateContext } from './slack-local-gate-context'
 import type { SlackLocalReads } from './slack-local-inbound'
 import type { SlackLocalParticipation } from './slack-local-participation'
@@ -60,32 +61,40 @@ export class SlackLocalThreadChats {
   }
 
   /** Whether the bot joined a channel-message thread: remembered, or read from the thread itself. */
-  async joined(message: LocalSlackMessage, chat: ThreadChat, budgetMs: number) {
+  /** Whether the bot joined a channel-message thread, and the thread as read to tell (when it was). */
+  async joined(
+    message: LocalSlackMessage,
+    chat: ThreadChat,
+    budgetMs: number
+  ): Promise<{
+    joined: boolean
+    read?: { messages: LocalSlackThreadMessage[]; complete: boolean }
+  }> {
     const participation = this.deps.participation
     if (!participation) {
-      return false
+      return { joined: false }
     }
     await participation.load()
     const id = chat.key.externalId
     if (participation.has(id)) {
-      return true
+      return { joined: true }
     }
     if (participation.slackSaid(id) === false) {
-      return false
+      return { joined: false }
     }
     const read = await this.deps.channelReads?.bounded(
       (signal) => this.deps.reads.thread(message.channelId, message.threadTs, signal),
       budgetMs
     )
     if (!read) {
-      return false
+      return { joined: false }
     }
     const posted = read.messages.some((entry) => entry.userId === this.deps.botUserId)
     // Not on the first page and more follows: unknown, so not joined (rechecked next time).
     if (posted || read.complete) {
       participation.rememberSlack(id, posted)
     }
-    return posted
+    return { joined: posted, read }
   }
 
   /** Which queue a message waits in, or null to drop it now: a sure channel message the gate doesn't

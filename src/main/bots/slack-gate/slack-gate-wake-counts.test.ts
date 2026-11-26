@@ -3,7 +3,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BotStateFile, useBotStateRoot } from './bot-state-file'
 import { RESERVATION_WAIT_MS, SlackGateWakeCounts, localDay } from './slack-gate-wake-counts'
 
@@ -215,4 +215,25 @@ it('reserves no more than its cap, and never writes message text or question nam
   const text = readFileSync(new BotStateFile('bot-slack-gate-wakes', 'b1').path, 'utf8')
   expect(text).not.toContain('secret_question_name')
   expect(localDay(now)).toBe('2026-11-26')
+})
+
+it('runs a cooldown from now when the clock went back past the last wake, and keeps that', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const woke = store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!
+  await woke.persisted
+  woke.admit(now)
+  woke.commit(now)
+  const cooldown = { cooldownMinutes: 30 }
+  // A day back: the wake counts as now, so 31 minutes later the cooldown is over.
+  now -= 86_400_000
+  expect(store.open(bot, 'C1', 'banter', cooldown, now)).toBe(false)
+  advance(31 * 60_000)
+  expect(store.open(bot, 'C1', 'banter', cooldown, now)).toBe(true)
+  // And after a restart too: the pulled-back time was written.
+  await vi.waitFor(async () => {
+    const restarted = counts()
+    const again = await restarted.load('b1', 0)
+    expect(restarted.open(again, 'C1', 'banter', cooldown, now)).toBe(true)
+  })
 })

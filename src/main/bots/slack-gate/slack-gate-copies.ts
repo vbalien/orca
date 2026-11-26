@@ -54,23 +54,23 @@ async function readCopy(botId: string): Promise<{ gate: BotSlackGate; oldView: s
 }
 
 /** After a save: keep a copy of a gate older builds can't hold whole; drop it otherwise, unless the
- *  saved gate is what an older Orca leaves of the copied one (an older client saved it unchanged). */
+ *  saved gate is what an older Orca leaves of the copied one (an older client saved it unchanged).
+ *  False when a copy that should be kept could not be written. */
 export function keepSlackGateCopy(
   botId: string,
   saved: BotSlackGate | null,
   options: { explicitRemoval?: boolean } = {}
-): Promise<void> {
+): Promise<boolean> {
   return inLine(botId, async () => {
     const file = fileOf(botId)
     if (saved && slackGateUsesNewerFields(saved)) {
-      await file.write(() => ({ v: 1, gate: saved, oldView: digest(oldSchemaView(saved)) }))
-      return
+      return await file.write(() => ({ v: 1, gate: saved, oldView: digest(oldSchemaView(saved)) }))
     }
     const copy = options.explicitRemoval ? null : await readCopy(botId)
-    if (copy && copy.oldView === digest(saved ?? null)) {
-      return
+    if (!copy || copy.oldView !== digest(saved ?? null)) {
+      await file.clear()
     }
-    await file.clear()
+    return true
   })
 }
 

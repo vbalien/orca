@@ -101,13 +101,12 @@ async function saveGate(
     // A save replaces a retired gate's notice along with the gate.
     return { slackGate: stored, slackGateRetired: undefined }
   })
-  await keepSlackGateCopy(botId, stored, options).catch((error: unknown) =>
-    console.warn(
-      '[bots] could not keep a copy of a Slack gate',
-      error instanceof Error ? error.name : ''
-    )
-  )
-  return { bot }
+  // Saved either way; without the copy, Restore can't bring back what an older build drops.
+  const copyKept = await keepSlackGateCopy(botId, stored, options).catch(() => false)
+  if (!copyKept) {
+    console.warn('[bots] could not keep a copy of a Slack gate for older builds')
+  }
+  return { bot, ...(copyKept ? {} : { copyKept: false as const }) }
 }
 
 const setGate = defineMethod({

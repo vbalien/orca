@@ -15,13 +15,15 @@ export class SlackLocalParticipation {
   private readonly threads = new Map<string, true>()
   // Posted or not, as the thread's own messages said; dropped once we post.
   private readonly seenInSlack = new Map<string, boolean>()
-  private file: BotStateFile
+  private readonly file: BotStateFile
   private loading: Promise<void> | null = null
+  // Forgotten for good: a late post or mention never writes it again (a new record takes over).
+  private closed = false
   // @mentions on their way into a not-yet-joined thread's chat, and the notices waiting on them.
   private readonly mentions = new Map<string, { inFlight: number; waiting: (() => void)[] }>()
 
   constructor(
-    private readonly botId: string,
+    botId: string,
     /** Whether a conversation still has its chat link (an entry without one is dropped). */
     private readonly linked: (externalId: string) => boolean
   ) {
@@ -54,6 +56,9 @@ export class SlackLocalParticipation {
     if (this.seenInSlack.size >= 4_000) {
       this.seenInSlack.clear()
     }
+    if (this.closed) {
+      return
+    }
     this.seenInSlack.set(externalId, posted)
     if (posted) {
       this.add(externalId)
@@ -62,7 +67,7 @@ export class SlackLocalParticipation {
 
   /** The bot posted there, or an @mention of it there was taken. */
   add(externalId: string): void {
-    if (this.threads.has(externalId)) {
+    if (this.closed || this.threads.has(externalId)) {
       return
     }
     this.threads.delete(externalId)
@@ -116,13 +121,14 @@ export class SlackLocalParticipation {
     return true
   }
 
-  /** The bot stopped using its own app (or is gone): what it joined is forgotten. */
+  /** The bot stopped using its own app (or is gone): what it joined is forgotten, and this record is
+   *  closed for good; SlackLocalParticipations makes a new one if it comes back. */
   async forget(): Promise<void> {
+    this.closed = true
     this.threads.clear()
     this.seenInSlack.clear()
-    await this.file.remove()
-    this.file = new BotStateFile(FOLDER, this.botId)
     this.loading = Promise.resolve()
+    await this.file.remove()
   }
 }
 

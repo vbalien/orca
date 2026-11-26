@@ -221,7 +221,8 @@ the gate is still what that build left.
 Orca Cloud's app doesn't send a bot channel messages. An automation on **Slack message** can wake it for
 a channel's new top-level messages, and the gate's **Automation events** case checks them (the same
 rules, scripts and limits; the bot is told it is a channel message and may stay quiet with `NO_REPLY`).
-Like a channel message on your own app, such an event never wakes the bot when the check fails or is
-unsure, whatever **If the check fails** says; other automation events still follow it.
+OpenAI is asked about such an event as a channel message (`case` is `channel_message`), so the channel
+rules apply; and like a channel message on your own app, it never wakes the bot when the check fails or
+is unsure, whatever **If the check fails** says. Other automation events still follow it.
 What Orca Cloud can't do: replies in threads (each thread has to be named), and keeping one conversation
 per thread (every message is a new run). Use your own Slack app for those.

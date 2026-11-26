@@ -52,22 +52,28 @@ async function home() {
   return { store, link }
 }
 
-it('posts only for a linked chat of the answering bot', async () => {
+const of = (botId: string, paneKey: string) => ({ botId, paneKey })
+
+it('posts only for the chat that still holds its thread', async () => {
   const { store, link } = await home()
-  expect(canonicalLocalChat(store, ordinary.externalId, 'b1')).toBe(false)
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's1'))).toBe(false)
   link(ordinary, 'b1', 's1')
-  expect(canonicalLocalChat(store, ordinary.externalId, 'b1')).toBe(true)
-  expect(canonicalLocalChat(store, ordinary.externalId, 'b2')).toBe(false)
-  // Unlinked while the answer waited (a 429): it no longer goes.
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's1'))).toBe(true)
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b2', 's1'))).toBe(false)
+  // Another chat of the same bot took the thread while an answer waited (a 429): the old one is out.
+  link(ordinary, 'b1', 's3')
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's1'))).toBe(false)
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's3'))).toBe(true)
+  // Unlinked: nothing goes.
   removeLink(store, ordinary)
-  expect(canonicalLocalChat(store, ordinary.externalId, 'b1')).toBe(false)
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's3'))).toBe(false)
 })
 
 it('lets a channel-message chat post only while the bot has no ordinary chat in that thread', async () => {
   const { store, link } = await home()
   link(channel, 'b1', 's1')
-  expect(canonicalLocalChat(store, channel.externalId, 'b1')).toBe(true)
+  expect(canonicalLocalChat(store, channel.externalId, of('b1', 's1'))).toBe(true)
   link(ordinary, 'b1', 's2')
-  expect(canonicalLocalChat(store, channel.externalId, 'b1')).toBe(false)
-  expect(canonicalLocalChat(store, ordinary.externalId, 'b1')).toBe(true)
+  expect(canonicalLocalChat(store, channel.externalId, of('b1', 's1'))).toBe(false)
+  expect(canonicalLocalChat(store, ordinary.externalId, of('b1', 's2'))).toBe(true)
 })

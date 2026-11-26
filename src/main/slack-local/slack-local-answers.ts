@@ -19,7 +19,7 @@ export class SlackLocalAnswers {
       onError: (botId: string, code: string) => void
       onDelivered: (botId: string) => void
       participation?: (botId: string) => SlackLocalParticipation
-      canPost?: (botId: string, externalId: string) => boolean
+      canPost?: (botId: string, externalId: string, paneKey: string) => boolean
     }
   ) {}
 
@@ -56,7 +56,10 @@ export class SlackLocalAnswers {
       onDelivered: () => this.deps.onDelivered(botId),
       ...(this.deps.participation ? { participation: this.deps.participation(botId) } : {}),
       ...(this.deps.canPost
-        ? { canPost: (externalId: string) => this.deps.canPost!(botId, externalId) }
+        ? {
+            canPost: (externalId: string, paneKey: string) =>
+              this.deps.canPost!(botId, externalId, paneKey)
+          }
         : {})
     })
     this.senders.set(botId, { replies, abort })

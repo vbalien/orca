@@ -127,7 +127,9 @@ export class SlackGateOpenAIRun {
       .askOpenAI({
         config,
         bot: { name: bot.name },
-        event,
+        // A slack.message automation event is asked as the channel message it is, so the channel
+        // questions (which answer false for other cases) judge it.
+        event: isChannelMessage(event) ? { ...event, case: 'channel_message' as const } : event,
         key,
         signal,
         opaque: rulesFrom === 'script'

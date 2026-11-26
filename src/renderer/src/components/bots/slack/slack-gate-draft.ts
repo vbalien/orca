@@ -1,4 +1,6 @@
-// The "Check before waking" form's state, and how it turns into the gate the save RPC takes.
+// The "Check before waking" form's state, how it turns into the gate the save RPC takes, and the save.
+import { refreshBotHost } from '@/lib/bot-catalog'
+import { callBotRpc } from '@/lib/bot-hosts'
 import type { Bot } from '../../../../../shared/bot-types'
 import {
   BotSlackGateEditSchema,
@@ -12,6 +14,7 @@ import {
   parseSlackGateRulesText
 } from '../../../../../shared/bots/slack-gate-rules-text'
 import { SLACK_GATE_DEFAULT_RULES } from '../../../../../shared/bots/slack-gate-default-rules'
+import { saveSlackGate } from './rules/slack-gate-save'
 
 export type SlackGateDraft = {
   on: boolean
@@ -89,4 +92,23 @@ export function gateOf(draft: SlackGateDraft): BotSlackGateEdit | null {
         }
   )
   return parsed.success ? parsed.data : null
+}
+
+/** Saves the gate (null removes it) on the bot's host, then reads its bots again; false when the host
+ *  could not keep its copy for older builds. */
+export async function saveGate(
+  bot: Bot,
+  gate: BotSlackGateEdit | null,
+  hostHasFeatures: boolean
+): Promise<boolean> {
+  try {
+    return await saveSlackGate(
+      (method, params) => callBotRpc(bot, method, params),
+      bot.id,
+      gate,
+      hostHasFeatures
+    )
+  } finally {
+    await refreshBotHost(bot.hostId)
+  }
 }
