@@ -20,6 +20,7 @@ import {
   countWake,
   keptKeys,
   pendingFor,
+  closedCounts,
   pruneCounts,
   serializeCounts
 } from './slack-gate-wake-counts-entries'
@@ -49,6 +50,8 @@ export type SlackGateWakeCountsDeps = {
 export class SlackGateWakeCounts {
   private readonly bots = new Map<string, Promise<BotCounts>>()
   private readonly lastWarn = new Map<string, { at: number; count: number }>()
+  // Deleted bots: a check still under way for one counts in memory only, never in a file again.
+  private readonly forgotten = new Set<string>()
 
   constructor(private readonly deps: SlackGateWakeCountsDeps) {}
 
@@ -70,7 +73,9 @@ export class SlackGateWakeCounts {
   load(botId: string, longestCooldownMinutes: number): Promise<BotCounts> {
     let loading = this.bots.get(botId)
     if (!loading) {
-      loading = this.read(botId, longestCooldownMinutes)
+      loading = this.forgotten.has(botId)
+        ? Promise.resolve(closedCounts(new BotStateFile(FOLDER, botId)))
+        : this.read(botId, longestCooldownMinutes)
       this.bots.set(botId, loading)
     }
     return loading
@@ -133,7 +138,7 @@ export class SlackGateWakeCounts {
       void bot.file.write(() => serializeCounts(bot, this.deps.now()))
     }
     const pending = pendingFor(bot, channelId, key)
-    if (!entry && keptKeys(bot, at) >= MAX_KEYS) {
+    if (!entry && pending.length === 0 && keptKeys(bot, at) >= MAX_KEYS) {
       this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
       return false
     }
@@ -188,6 +193,15 @@ export class SlackGateWakeCounts {
     }
     const key = slackGateWakeKey(input.question)
     const current = bot.keys.get(input.channelId)?.get(key)
+    // A new rule's count needs room, as open() saw it; another reservation may have taken it since.
+    if (
+      !current &&
+      !pendingFor(bot, input.channelId, key).length &&
+      keptKeys(bot, input.at) >= MAX_KEYS
+    ) {
+      this.warn('too many limited rules to count; this one waits', { channels: bot.keys.size })
+      return null
+    }
     const today = localDay(input.at)
     const entry: LiveEntry = {
       id: randomUUID(),
@@ -291,7 +305,9 @@ export class SlackGateWakeCounts {
   }
 
   /** The bot is gone: its counts with it. */
+  /** The bot was deleted: its file goes, and nothing writes it again. */
   async forget(botId: string): Promise<void> {
+    this.forgotten.add(botId)
     const loading = this.bots.get(botId)
     this.bots.delete(botId)
     const bot = loading ? await loading.catch(() => null) : null

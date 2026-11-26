@@ -1,6 +1,6 @@
 // A limited rule's counts: a reservation holds a count from the decision to its delivery, only a
 // delivered wake keeps it, and the counts survive a restart, an unreadable file and a clock set back.
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -236,4 +236,33 @@ it('runs a cooldown from now when the clock went back past the last wake, and ke
     const again = await restarted.load('b1', 0)
     expect(restarted.open(again, 'C1', 'banter', cooldown, now)).toBe(true)
   })
+})
+
+it('never writes a deleted bot’s counts again, even for a check that was under way', async () => {
+  const store = counts()
+  const path = new BotStateFile('bot-slack-gate-wakes', 'b1').path
+  const bot = await store.load('b1', 0)
+  await store.reserve(bot, { channelId: 'C1', question: 'banter', at: now })!.persisted
+  await store.forget('b1')
+  expect(existsSync(path)).toBe(false)
+  const late = await store.load('b1', 0)
+  const reservation = store.reserve(late, { channelId: 'C1', question: 'banter', at: now })!
+  expect(await reservation.persisted).toBe(false)
+  expect(existsSync(path)).toBe(false)
+})
+
+it('keeps room for reservations under the key cap, not only counts already kept', async () => {
+  const store = counts()
+  const bot = await store.load('b1', 0)
+  const today = localDay(now)
+  bot.keys.set(
+    'C0',
+    new Map(Array.from({ length: 999 }, (_, i) => [`k${i}`, { day: today, count: 1, lastAt: now }]))
+  )
+  expect(store.open(bot, 'C1', 'a', daily, now)).toBe(true)
+  expect(store.open(bot, 'C1', 'b', daily, now)).toBe(true)
+  expect(store.reserve(bot, { channelId: 'C1', question: 'a', at: now })).not.toBeNull()
+  // The last place went to the first: the second rule waits.
+  expect(store.open(bot, 'C1', 'b', daily, now)).toBe(false)
+  expect(store.reserve(bot, { channelId: 'C1', question: 'b', at: now })).toBeNull()
 })

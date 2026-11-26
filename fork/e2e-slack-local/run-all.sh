@@ -6,12 +6,13 @@
 set -u; source "$(dirname "$0")/env.sh"
 [ ${#R} -le 40 ] || { echo "E2E_RUN is too long for the keyring socket: $R"; exit 1; }
 N() { $E/ns.sh "$@"; }
+# Whatever happens from here, what this run started is stopped.
+trap '$E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder 2>/dev/null)" 2>/dev/null' EXIT
 $E/boot.sh || exit 1
 mkdir -p $E/shots
 (cd $REPO && node --import tsx $E/gates.mts $REPO $R/gates "/usr/bin/node $R/channel-rules.mjs" >/dev/null) || exit 1
 # A scenario that stops early (a shell error, a failed namespace entry) fails the run too.
 scenario() { N env PATH=$PATH ${E2E_OLD_DIST:+E2E_OLD_DIST=$E2E_OLD_DIST} "$E/$1" || echo "$1 exited with $?" >> $R/failures; }
-trap '$E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder 2>/dev/null)" 2>/dev/null' EXIT
 scenario scenarios-channel.sh
 scenario scenarios-script.sh
 [ -n "${E2E_OLD_DIST:-}" ] && scenario scenarios-old.sh

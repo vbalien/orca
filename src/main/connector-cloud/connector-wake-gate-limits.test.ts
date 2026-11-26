@@ -156,6 +156,13 @@ it('gives an automation event’s count back when its run can’t be made, and s
   expect(run.note).toContain('banter: join briefly')
   run.started()
   expect(await open()).toBe(false)
+  // Used up: the next event's run record says it was held by the limit, with no words of it.
+  const held = await gate
+    .triggerGate({ ...trigger, deliveryId: 't4' }, runEvent, undefined, () => {})!
+    .reserve(automation)
+  expect(held).toMatchObject({
+    skipped: { error: 'Slack wake gate held this event (rate limit).' }
+  })
 })
 
 it('settles a count a past run left by that run’s record: skipped goes back, dispatched stays', async () => {

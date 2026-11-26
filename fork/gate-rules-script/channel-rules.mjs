@@ -16,9 +16,10 @@
 import { createHash } from 'node:crypto'
 
 // ---- EDIT: the bot ------------------------------------------------------------------------------
-// Every name people call the bot by (any case). A channel message that calls it by one of these wakes
-// it at once, without asking OpenAI: names are matched letter by letter, which OpenAI did poorly on in
-// tuning (it took other bots' and the owner's names for the bot's).
+// Every name people call the bot by (any case). A channel message that opens by calling it ("mybot,
+// ..." or "봇아 ...", nobody else @mentioned) wakes it at once, without asking OpenAI: names are matched
+// letter by letter, which OpenAI did poorly on in tuning (it took other bots' and the owner's names for
+// the bot's). A message that only names it elsewhere is asked about (speaks_to_bot).
 const BOT_NAMES = ['mybot']
 // Its owner, a person (helps OpenAI tell the owner's name from the bot's).
 const OWNER_NAME = 'Owner Name'
@@ -53,12 +54,23 @@ const wakeKey = (questionName) =>
   createHash('sha256').update(questionName).digest('hex').slice(0, 16)
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-// A name on its own: not inside a longer word, and not followed by a Latin letter, digit, _ or - (so
-// "mybot2" or "mybots" is someone else). Korean particles may follow it ("봇아", "봇님").
-const NAMED = new RegExp(
-  `(^|[^\\p{L}\\p{N}])(${BOT_NAMES.map(escape).join('|')})(?![A-Za-z0-9_-])`,
+const NAMES = BOT_NAMES.map(escape).join('|')
+// The name anywhere, on its own: not inside a longer word, and not followed by a Latin letter, digit,
+// _ or - (so "mybot2" or "mybots" is someone else). Korean particles may follow it ("봇아", "봇님").
+const NAMED = new RegExp(`(^|[^\\p{L}\\p{N}])(${NAMES})(?![A-Za-z0-9_-])`, 'iu')
+// Called by name: the message opens with it (after a greeting or "@"), as a call — a comma, colon,
+// "!", "?" or "~" after it, a vocative particle (아, 야, 님, 씨), a greeting ("하이", "hi"), or
+// nothing else at all.
+const CALLED = new RegExp(
+  `^[\\s@]*(?:(?:hi|hey|hello|yo|안녕하세요|안녕)[\\s,!.~]*)?(?:${NAMES})(?=\\s*[,:!?~]|아|야|님|씨|하이|\\s*(?:hi|hello|안녕)|\\s*$)`,
   'iu'
 )
+// A message that names the bot wakes it from here (tuned on 16 named messages; see fork/README).
+const SPEAKS_AT_LEAST = 0.5
+// Anyone @mentioned: then it isn't a call to the bot alone.
+const MENTIONS_SOMEONE = /<@[A-Z0-9]+>/
+const SPEAKS =
+  "The new message (message) names the bot: botName or one of botNames; ownerName, if given, is its owner, a person. Answer true only if the message speaks to the bot: greets it, asks it something or asks it to do something, even when the request is about someone else, such as passing a message on to a person. Answer false when it only talks about the bot (a status, a report, a joke about it), or speaks to someone else: a person (the owner included, whose name may look like the bot's) or another bot."
 
 function decide(event) {
   // Mentions, DMs and replies in the bot's own threads: the editor's saved rules.
@@ -72,7 +84,9 @@ function decide(event) {
   if (!channel) {
     return { wake: false }
   }
-  if (NAMED.test(event.text ?? '')) {
+  const text = event.text ?? ''
+  // Called by name: wakes at once (OpenAI did poorly on names in tuning).
+  if (CALLED.test(text) && !MENTIONS_SOMEONE.test(text)) {
     return { wake: true, reason: 'called by name' }
   }
   const questions = [{ type: 'predicate', name: 'asks_for_role_help', instructions: HELP }]
@@ -83,6 +97,16 @@ function decide(event) {
       note: 'asked the room for help: answer it'
     }
   ]
+  // Named but not called ("can mybot check this?", "mybot is down"): OpenAI tells whether it speaks to
+  // it — unless it @mentions someone, then it speaks to them (OpenAI took "this is for you" for the bot).
+  if (NAMED.test(text) && !MENTIONS_SOMEONE.test(text)) {
+    questions.push({ type: 'predicate', name: 'speaks_to_bot', instructions: SPEAKS })
+    rules.push({
+      question: 'speaks_to_bot',
+      wakeIf: { atLeast: SPEAKS_AT_LEAST },
+      note: 'spoken to by name'
+    })
+  }
   // Leave the banter question out while its limit is used up: one question less to pay for.
   const used = event.wakes?.[wakeKey('joinable_banter')]
   const banterOpen =

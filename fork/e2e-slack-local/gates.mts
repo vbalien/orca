@@ -34,6 +34,18 @@ const gates: Record<string, { openai: unknown }> = {
     }
   },
   cooldown: { ...base, openai: only('joinable_banter', { cooldownMinutes: 60 }) },
+  // The channel question alone, at most once a day: a wake that never reached the bot gives it back.
+  heldLimit: {
+    ...base,
+    openai: {
+      ...d.SLACK_GATE_CHANNEL_DEFAULT_RULES,
+      questions: d.SLACK_GATE_CHANNEL_DEFAULT_RULES.questions.filter(
+        (q: { name: string }) => q.name === 'asks_the_bot'
+      ),
+      rules: [{ question: 'asks_the_bot', wakeIf: { atLeast: 0.9 }, limit: { perDay: 1 } }],
+      combine: 'any'
+    }
+  },
   script: { ...base, openai: d.SLACK_GATE_CHANNEL_DEFAULT_RULES, rulesCommand: script }
 }
 mkdirSync(out, { recursive: true })

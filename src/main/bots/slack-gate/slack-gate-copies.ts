@@ -26,6 +26,14 @@ function stable(value: unknown): string {
 
 const digest = (value: unknown) => createHash('sha256').update(stable(value)).digest('hex')
 
+/** Whether two stored gates are the same, whichever order their fields came in. */
+export function sameSlackGate(
+  a: BotSlackGate | null | undefined,
+  b: BotSlackGate | null | undefined
+) {
+  return stable(a ?? null) === stable(b ?? null)
+}
+
 // One file and one line of work per bot: a later save's copy never lands under an earlier one's, and
 // a removed bot's copy is not written again by work already under way.
 const files = new Map<string, BotStateFile>()
@@ -59,7 +67,7 @@ async function readCopy(botId: string): Promise<{ gate: BotSlackGate; oldView: s
 export function keepSlackGateCopy(
   botId: string,
   saved: BotSlackGate | null,
-  options: { explicitRemoval?: boolean } = {}
+  options: { explicitRemoval?: boolean | undefined } = {}
 ): Promise<boolean> {
   return inLine(botId, async () => {
     const file = fileOf(botId)

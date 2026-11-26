@@ -105,6 +105,11 @@ export class BotStateFile {
     return run
   }
 
+  /** No more writes, and nothing removed: the file stays as it is. */
+  close(): void {
+    this.closed = true
+  }
+
   /** No more writes; waits for the one under way, then removes the file. */
   async remove(): Promise<void> {
     this.closed = true

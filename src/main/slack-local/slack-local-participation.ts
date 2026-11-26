@@ -25,21 +25,26 @@ export class SlackLocalParticipation {
   constructor(
     botId: string,
     /** Whether a conversation still has its chat link (an entry without one is dropped). */
-    private readonly linked: (externalId: string) => boolean
+    private readonly linked: (externalId: string) => boolean,
+    /** An earlier record of the same bot still being removed: this one reads and writes after it. */
+    private readonly after: Promise<unknown> = Promise.resolve()
   ) {
     this.file = new BotStateFile(FOLDER, botId)
   }
 
   /** Reads the file once; an unreadable one starts empty (Slack reads then recover posts). */
   load(): Promise<void> {
-    this.loading ??= this.file.read().then((read) => {
-      const parsed = read.kind === 'ok' ? ParticipationFile.safeParse(read.value) : null
-      for (const id of parsed?.success ? parsed.data.threads : []) {
-        if (this.linked(id)) {
-          this.threads.set(id, true)
+    this.loading ??= this.after
+      .catch(() => undefined)
+      .then(() => this.file.read())
+      .then((read) => {
+        const parsed = read.kind === 'ok' ? ParticipationFile.safeParse(read.value) : null
+        for (const id of parsed?.success ? parsed.data.threads : []) {
+          if (this.linked(id)) {
+            this.threads.set(id, true)
+          }
         }
-      }
-    })
+      })
     return this.loading
   }
 
@@ -80,7 +85,10 @@ export class SlackLocalParticipation {
       this.threads.delete(oldest)
     }
     this.seenInSlack.delete(externalId)
-    void this.file.write(() => ({ v: 1, threads: [...this.threads.keys()] }))
+    // Written once the file was read, so what an earlier run recorded is kept.
+    void this.load().then(() =>
+      this.file.write(() => ({ v: 1, threads: [...this.threads.keys()] }))
+    )
   }
 
   /** An @mention is being delivered into a thread the bot hasn't joined: notices that come meanwhile
@@ -135,13 +143,15 @@ export class SlackLocalParticipation {
 /** Each bot's record, one per bot across reconnects. */
 export class SlackLocalParticipations {
   private readonly bots = new Map<string, SlackLocalParticipation>()
+  // A forgotten record's removal, which the bot's next record waits for.
+  private readonly removing = new Map<string, Promise<void>>()
 
   constructor(private readonly linked: (externalId: string) => boolean) {}
 
   of(botId: string): SlackLocalParticipation {
     let kept = this.bots.get(botId)
     if (!kept) {
-      kept = new SlackLocalParticipation(botId, this.linked)
+      kept = new SlackLocalParticipation(botId, this.linked, this.removing.get(botId))
       this.bots.set(botId, kept)
     }
     return kept
@@ -149,7 +159,13 @@ export class SlackLocalParticipations {
 
   /** Off its own app or deleted: which channel-message threads it joined no longer matters. */
   forget(botId: string): void {
-    void this.of(botId).forget()
+    const removal = this.of(botId).forget()
     this.bots.delete(botId)
+    this.removing.set(botId, removal)
+    void removal.finally(() => {
+      if (this.removing.get(botId) === removal) {
+        this.removing.delete(botId)
+      }
+    })
   }
 }

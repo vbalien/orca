@@ -1,5 +1,6 @@
 // The wake counts' bookkeeping on one bot's loaded counts: what is written to its file, which counts
 // are kept, and one delivered wake's count.
+import type { BotStateFile } from './bot-state-file'
 import {
   localDay,
   type BotCounts,
@@ -30,17 +31,24 @@ export function pendingFor(bot: BotCounts, channelId: string, key: string) {
   )
 }
 
-/** Counts kept whatever the cap: today's or still cooling down (14 days covers every cooldown). */
+/** Counts kept whatever the cap: today's or still cooling down (14 days covers every cooldown), and
+ *  those reservations will add. */
 export function keptKeys(bot: BotCounts, at: number): number {
-  let kept = 0
-  for (const keys of bot.keys.values()) {
-    for (const entry of keys.values()) {
+  const kept = new Set<string>()
+  for (const [channelId, keys] of bot.keys) {
+    for (const [key, entry] of keys) {
       if (entry.day >= localDay(at) || at - entry.lastAt < KEEP_DAYS * 86_400_000) {
-        kept++
+        kept.add(`${channelId} ${key}`)
       }
     }
   }
-  return kept
+  // A reservation not counted yet will be: it takes its place now.
+  for (const entry of bot.pending.values()) {
+    if (entry.phase !== 'settled') {
+      kept.add(`${entry.channelId} ${entry.key}`)
+    }
+  }
+  return kept.size
 }
 
 export function pruneCounts(bot: BotCounts, at: number): void {
@@ -70,4 +78,10 @@ export function countWake(bot: BotCounts, entry: PendingEntry, at: number): void
         ? { day, count: 1, lastAt: current.lastAt }
         : { ...current }
   keys.set(entry.key, { ...next, lastAt: Math.max(current.lastAt, at) })
+}
+
+/** A deleted bot's counts: in memory only, its file never written again. */
+export function closedCounts(file: BotStateFile): BotCounts {
+  file.close()
+  return { file, keys: new Map(), pending: new Map(), unsafe: false }
 }

@@ -7,8 +7,10 @@ asks() { [ -f $R/fake/decisions.jsonl ] && wc -l < $R/fake/decisions.jsonl || ec
 turns() { [ -f $R/fake/anthropic.jsonl ] && wc -l < $R/fake/anthropic.jsonl || echo 0; }
 lastpost() { grep '"api":"chat.postMessage"' $R/fake/calls.jsonl | tail -1 | python3 -c 'import json,sys;p=json.loads(sys.stdin.read() or "{}").get("params",{});print("thread", p.get("thread_ts","-"))'; }
 event() { curl -s -X POST $CTL/event -d "$1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["ts"])'; }
-# Every Slack write the bot made (posts, edits, reactions, status...): any Web API call but the reads.
-writes() { grep '"api":' $R/fake/calls.jsonl | grep -cvE '"api":"(auth\.test|bots\.info|apps\.connections\.open|users\.info|conversations\.[a-z]+)"' || true; }
+# Every Slack write the bot made (posts, edits, reactions, joins, status...): any Web API call but the
+# reads this app makes.
+READS='"api":"(auth\.test|bots\.info|apps\.connections\.open|users\.info|conversations\.(replies|info|history))"'
+writes() { grep '"api":' $R/fake/calls.jsonl | grep -cvE "$READS" || true; }
 # step <name> <wait s> <event json> <expected "decisions/agent/writes">: sends it, waits, prints the
 # counts and records a failure when they differ. agent is 0 (no agent turn) or + (one or more).
 # The event's ts goes to $R/last-ts.

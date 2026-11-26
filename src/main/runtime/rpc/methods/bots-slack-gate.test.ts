@@ -14,6 +14,8 @@ import {
   useSlackGateKeyRoot
 } from '../../../bots/slack-gate/slack-gate-key'
 import { SlackGateSetKey } from '../../../../shared/rpc-contract/bots-slack-gate-params'
+import { oldSchemaView } from '../../../../shared/bots/slack-gate-store-form'
+import { useBotStateRoot } from '../../../bots/slack-gate/bot-state-file'
 import type { RpcContext } from '../core'
 import { BOT_SLACK_GATE_METHODS } from './bots-slack-gate'
 
@@ -210,5 +212,52 @@ describe('bots.slackGate key methods', () => {
       call('bots.slackGate.setKey', { botId: 'other', key: 'secret' }, context)
     ).rejects.toThrow('No such bot.')
     expect(await readSlackGateKey('other')).toBeNull()
+  })
+})
+
+describe('bots.slackGate.restore', () => {
+  const limited = {
+    on: true,
+    kind: 'openai' as const,
+    appliesTo: ['thread_reply' as const],
+    timeoutSeconds: 5,
+    onError: 'wake' as const,
+    openai: {
+      questions: [{ type: 'predicate' as const, name: 'q', instructions: 'Q?' }],
+      rules: [{ question: 'q', wakeIf: { atLeast: 0.9 }, limit: { perDay: 2 } }]
+    }
+  }
+  /** Stored by this build, then rewritten by an older one. */
+  async function olderBuildRewrote() {
+    const record = saved()
+    const { context } = contextFor(PAIRED, record)
+    await call('bots.slackGate.store', { botId: 'b1', gate: limited }, context)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the old schema's view of a stored gate.
+    record.bot = { ...record.bot, slackGate: oldSchemaView(record.bot.slackGate) as BotSlackGate }
+    return record
+  }
+  beforeEach(() => useBotStateRoot(dir))
+  afterEach(() => useBotStateRoot(null))
+
+  it('keeps showing Restore after a key change', async () => {
+    const record = await olderBuildRewrote()
+    const { context } = contextFor(PAIRED, record)
+    const status = await call('bots.slackGate.setOpenAIKey', { botId: 'b1', key: 'sk-x' }, context)
+    expect(status).toMatchObject({ restorable: true })
+  })
+
+  it('restores only over the gate it checked, never a change made meanwhile', async () => {
+    const record = await olderBuildRewrote()
+    const { context, bots } = contextFor(PAIRED, record)
+    const edit = bots.update.getMockImplementation()!
+    // Another device saves a gate while the copy is read.
+    bots.update.mockImplementationOnce(async (id, change) => {
+      record.bot = { ...record.bot, slackGate: gate('other') }
+      return await edit(id, change)
+    })
+    await expect(call('bots.slackGate.restore', { botId: 'b1' }, context)).rejects.toThrow(
+      'changed meanwhile'
+    )
+    expect(record.bot.slackGate).toEqual(gate('other'))
   })
 })

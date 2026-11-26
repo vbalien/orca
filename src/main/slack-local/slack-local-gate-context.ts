@@ -109,50 +109,14 @@ export class SlackLocalGateContext {
     limit: number,
     budgetMs = GATE_CONTEXT_BUDGET_MS
   ): Promise<GateContextItem[]> {
-    const now = this.deps.now?.() ?? Date.now()
-    if (
-      budgetMs <= 0 ||
-      this.reading >= (this.deps.atOnce ?? GATE_CONTEXT_READS_AT_ONCE) ||
-      now < this.pause.until
-    ) {
-      return [{ kind: 'unreadable', text: '' }]
-    }
-    this.reading += 1
-    const budget = new AbortController()
-    // A plain timer, not AbortSignal.timeout: it goes with the read, and tests can drive it.
-    const timer = setTimeout(() => budget.abort(), Math.min(budgetMs, GATE_CONTEXT_BUDGET_MS))
-    timer.unref?.()
-    const stopped = new Promise<null>((resolve) =>
-      budget.signal.addEventListener('abort', () => resolve(null), { once: true })
+    const read = await this.bounded(
+      (signal) => this.deps.recentThread(message.channelId, message.threadTs, message.ts, signal),
+      budgetMs
     )
-    try {
-      const read = await Promise.race([
-        this.deps.recentThread(
-          message.channelId,
-          message.threadTs,
-          message.ts,
-          AbortSignal.any([this.deps.signal, budget.signal])
-        ),
-        stopped
-      ])
-      if (!read) {
-        return [{ kind: 'unreadable', text: '' }]
-      }
-      // Past the pages it may read, the newest messages are missing: as good as unreadable.
-      if (!read.complete) {
-        return [{ kind: 'unreadable', text: '' }]
-      }
-      return gateContextFrom(read.messages, message, limit, this.deps.botUserId)
-    } catch (error) {
-      if (error instanceof SlackApiError && error.retryAfterMs !== undefined) {
-        this.pause.until = (this.deps.now?.() ?? Date.now()) + error.retryAfterMs
-      }
-      return [{ kind: 'unreadable', text: '' }]
-    } finally {
-      clearTimeout(timer)
-      budget.abort()
-      this.reading -= 1
-    }
+    // Unread, or past the pages it may read (the newest messages missing): as good as unreadable.
+    return read?.complete
+      ? gateContextFrom(read.messages, message, limit, this.deps.botUserId)
+      : [{ kind: 'unreadable', text: '' }]
   }
 }
 

@@ -294,7 +294,9 @@ export function createConnectorWakeGate(deps: ConnectorWakeGateDeps) {
             error:
               decision.reason === 'error'
                 ? `Slack wake gate failed and blocked this event: ${decision.error ?? 'error'}`
-                : 'Slack wake gate blocked this event.',
+                : decision.reason === 'rate_limited'
+                  ? 'Slack wake gate held this event (rate limit).'
+                  : 'Slack wake gate blocked this event.',
             precheckResult: precheckResult(decision, bot.slackGate?.kind ?? 'gate', startedAt)
           }
         }

@@ -24,18 +24,21 @@ echo "== limits: banter only, 60 min apart"; gate cooldown
 step "13 [banter] inside the cooldown (all wake rules closed: no OpenAI call)" 8 "$(top '[banter] what a day')" 0/0/0
 echo "== restart the server"; n0=$(count $R/fake/calls.jsonl '"socket":"open"'); touch $R/stop-server; sleep 6; env PATH=$PATH $E/start-server.sh >/dev/null; socket_back $n0; sleep 3
 step "14 [banter] after the restart (cooldown kept)" 8 "$(top '[banter] weekend plans?')" 0/0/0
-echo "== OpenAI answer held while the channel is removed"; gate channel >/dev/null
-p0=$(writes); event "$(top '[hold] is the bot around?')" > /dev/null; sleep 2
-off="{\"botId\":\"$B\",\"gate\":$(python3 -c "import json;g=json.load(open('$R/gates/channel.json'));g.pop('channelMessages');print(json.dumps(g))")}"
-$E/call.sh person bots.slackGate.store "$off" | cut -c1-80; curl -s -X POST $CTL/release; sleep 10
-say "held then released after the channel was turned off: slack writes" "$(( $(writes) - p0 ))" 0
+echo "== OpenAI answer held while the channel is removed (a rule allowed once a day)"; gate heldLimit >/dev/null
+w0=$(writes); t0=$(turns); event "$(top '[hold] is the bot around?')" > /dev/null; sleep 2
+off="{\"botId\":\"$B\",\"gate\":$(python3 -c "import json;g=json.load(open('$R/gates/heldLimit.json'));g.pop('channelMessages');print(json.dumps(g))")}"
+$E/call.sh person bots.slackGate.store "$off" | cut -c1-60; say "held answers released" "$(curl -s -X POST $CTL/release)" '{"released":1}'; sleep 10
+say "after release: agent turns, slack writes" "$(( $(turns) - t0 ))/$(( $(writes) - w0 ))" 0/0
+gate heldLimit >/dev/null
+step "18h channel on again, [wake]: the day's one wake is still there" 12 "$(top '[wake] who has the projector key?')" 1/+/1
 echo "== restart after a quiet answer, and a joined thread after the channel is removed"; gate channel >/dev/null
 step "19 top-level [wake] the agent answers NO_REPLY" 12 "$(top '[wake] [quiet] is the printer fixed?')" 1/+/0; TQ=$(cat $R/last-ts)
 n0=$(count $R/fake/calls.jsonl '"socket":"open"'); touch $R/stop-server; sleep 6; env PATH=$PATH $E/start-server.sh >/dev/null; socket_back $n0; sleep 3
 step "20 after a restart: reply in that quiet thread, [chat]" 8 "$(reply $TQ '[chat] no idea')" 1/0/0; say "20 checked as" "$(lastcase)" channel_message
 step "21 after a restart: mention in that quiet thread" 12 "{\"user\":\"U0ASKER1\",\"text\":\"[chat] still there?\",\"channel\":\"C0CHAN01\",\"thread_ts\":\"$TQ\"}" 0/+/1
 say "21 the agent's request holds the quiet turn's message (same chat)" "$(tail -1 $R/fake/anthropic.jsonl | python3 -c "import json,sys;print('is the printer fixed' in json.load(sys.stdin)['all'])")" True
-$E/call.sh person bots.slackGate.store "$off" | cut -c1-60
+channelOff="{\"botId\":\"$B\",\"gate\":$(python3 -c "import json;g=json.load(open('$R/gates/channel.json'));g.pop('channelMessages');print(json.dumps(g))")}"
+$E/call.sh person bots.slackGate.store "$channelOff" | cut -c1-60
 step "22 channel removed: reply in thread 1 the bot answered before the restart, [wake]" 12 "$(reply $T1 '[wake] and the old notes?')" 1/+/1; say "22 checked as" "$(lastcase)" thread_reply
 echo "== Slack answers the bot's post with 429 (Retry-After 3 s)"
 curl -s -X POST $CTL/posts-mode -d '{"mode":"429"}' >/dev/null

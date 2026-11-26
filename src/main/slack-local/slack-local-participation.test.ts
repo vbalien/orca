@@ -1,9 +1,9 @@
 // Which channel-message threads a bot joined: forgetting them (off its own app, or deleted) closes the
 // record for good, so a mention still on its way when that happened never writes it again.
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { BotStateFile, useBotStateRoot } from '../bots/slack-gate/bot-state-file'
 import { SlackLocalParticipations } from './slack-local-participation'
 
@@ -28,4 +28,25 @@ it('never writes a forgotten bot’s record again, and starts a new one when it 
   expect(after).not.toBe(before)
   after.add('T1:C1:3.0:U0BOT:c')
   expect(after.has('T1:C1:3.0:U0BOT:c')).toBe(true)
+})
+
+it('lets a new record write only after the forgotten one is gone, and keeps what an earlier run wrote', async () => {
+  const records = new SlackLocalParticipations(() => true)
+  records.of('b1').add('T1:C1:1.0:U0BOT:c')
+  await vi.waitFor(() => expect(existsSync(file())).toBe(true))
+  // Off and straight back on: the new record's thread survives the old record's removal.
+  records.forget('b1')
+  records.of('b1').add('T1:C1:2.0:U0BOT:c')
+  await vi.waitFor(() =>
+    expect(JSON.parse(readFileSync(file(), 'utf8')).threads).toEqual(['T1:C1:2.0:U0BOT:c'])
+  )
+  // A restart: the first thread joined adds to what the file had, never replaces it.
+  const restarted = new SlackLocalParticipations(() => true)
+  restarted.of('b1').add('T1:C1:3.0:U0BOT:c')
+  await vi.waitFor(() =>
+    expect(JSON.parse(readFileSync(file(), 'utf8')).threads.sort()).toEqual([
+      'T1:C1:2.0:U0BOT:c',
+      'T1:C1:3.0:U0BOT:c'
+    ])
+  )
 })

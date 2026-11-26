@@ -20,7 +20,8 @@ import { slackGateScriptRun, slackGateWakeCounts } from '../../../bots/slack-gat
 import {
   forgetSlackGateCopy,
   keepSlackGateCopy,
-  restorableSlackGate
+  restorableSlackGate,
+  sameSlackGate
 } from '../../../bots/slack-gate/slack-gate-copies'
 import {
   clearSlackGateKey,
@@ -38,6 +39,11 @@ function ownerKeyChange(context: RpcContext, botId: string): void {
   if (!context.runtime.bots.list().some((bot) => bot.id === botId)) {
     throw new InvalidArgumentError('No such bot.')
   }
+}
+
+/** The bot's stored gate, so a key change answers the whole status (Restore included). */
+function storedGate(context: RpcContext, botId: string): BotSlackGate | null {
+  return context.runtime.bots.list().find((bot) => bot.id === botId)?.slackGate ?? null
 }
 
 async function keyStatus(botId: string, stored?: BotSlackGate | null): Promise<SlackGateKeyStatus> {
@@ -85,12 +91,22 @@ async function saveGate(
   context: RpcContext,
   botId: string,
   gate: BotSlackGate | BotSlackGateEdit | null,
-  options: { explicitRemoval?: boolean } = {}
+  options: {
+    explicitRemoval?: boolean
+    /** Saved only while the stored gate is still this one (checked in the bot's update queue). */
+    unchangedFrom?: BotSlackGate | null
+  } = {}
 ) {
   ownerOnly(context, 'Only your owner changes your Slack wake gate, in Orca.')
   const pairedDevice = context.caller?.kind === 'paired-device'
   const stored = slackGateToStore(gate)
   const bot = await context.runtime.bots.update(botId, (current) => {
+    if (
+      options.unchangedFrom !== undefined &&
+      !sameSlackGate(current.slackGate, options.unchangedFrom)
+    ) {
+      throw new InvalidArgumentError('The gate changed meanwhile; open it again to restore.')
+    }
     const before = current.slackGate ? effectiveSlackGate(current.slackGate) : current.slackGate
     if (
       pairedDevice &&
@@ -129,7 +145,7 @@ function keyMethods<Set extends string, Clear extends string>(
       handler: async ({ botId, key }, context) => {
         ownerKeyChange(context, botId)
         await saveSlackGateKey(botId, key, slot)
-        return await keyStatus(botId)
+        return await keyStatus(botId, storedGate(context, botId))
       }
     }),
     defineMethod({
@@ -139,7 +155,7 @@ function keyMethods<Set extends string, Clear extends string>(
       handler: async ({ botId }, context) => {
         ownerKeyChange(context, botId)
         await clearSlackGateKey(botId, slot)
-        return await keyStatus(botId)
+        return await keyStatus(botId, storedGate(context, botId))
       }
     })
   ]
@@ -174,7 +190,8 @@ export const BOT_SLACK_GATE_METHODS = [
       if (!copy) {
         throw new InvalidArgumentError('There is nothing to restore for this gate.')
       }
-      return await saveGate(context, botId, copy)
+      // Only over what it was checked against: a change from another device meanwhile stays.
+      return await saveGate(context, botId, copy, { unchangedFrom: current.slackGate ?? null })
     }
   }),
   defineMethod({
