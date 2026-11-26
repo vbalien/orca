@@ -27844,7 +27844,7 @@
         "key": "API key",
         "keySaved": "Saved",
         "keyMissing": "Not saved",
-        "keyUnsealed": "Saving a key needs the system keychain, which this computer does not offer Orca.",
+        "keyUnsealed": "Saving a key needs the system keychain on this bot’s computer, which it does not offer Orca.",
         "keySave": "Save key",
         "keyRemove": "Remove",
         "timeout": "Time limit (seconds)",

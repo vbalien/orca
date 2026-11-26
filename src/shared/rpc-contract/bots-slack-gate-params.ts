@@ -1,4 +1,5 @@
-// `bots.slackGate.*`: a bot's Slack wake gate and its key, changed from the owner's Orca only.
+// `bots.slackGate.*`: a bot's Slack wake gate and its key, changed by the owner's Orca, here or
+// paired (never an agent's CLI); a gate's command changes only on the bot's computer.
 import * as z from 'zod'
 import { BotSlackGateSchema } from '../bots/bot-slack-gate'
 

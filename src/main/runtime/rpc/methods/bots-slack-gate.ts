@@ -1,5 +1,5 @@
 // `bots.slackGate.*`: a bot's Slack wake gate. Only the owner changes it, never an agent's CLI; a
-// paired device may tune it but never choose its command or touch its key. Nothing returns the key.
+// paired device may tune it and set its key, but never choose its command. Nothing returns the key.
 import {
   LegacyBotSlackGateJevSchema,
   SLACK_GATE_DEFAULT_MODEL,
@@ -26,11 +26,9 @@ import {
 import { defineMethod, InvalidArgumentError, type RpcContext } from '../core'
 import { ownerOnly } from './bots-caller-gates'
 
-function ownersOrcaOnly(context: RpcContext, botId: string): void {
+/** The owner's Orca here or on a paired computer; the key is sealed on this host. */
+function ownerKeyChange(context: RpcContext, botId: string): void {
   ownerOnly(context, 'Your owner sets the Slack wake gate key in Orca.')
-  if (context.caller?.kind === 'paired-device') {
-    throw new InvalidArgumentError('Set the Slack wake gate key in Orca on this computer.')
-  }
   if (!context.runtime.bots.list().some((bot) => bot.id === botId)) {
     throw new InvalidArgumentError('No such bot.')
   }
@@ -122,7 +120,7 @@ export const BOT_SLACK_GATE_METHODS = [
     permission: 'workspace',
     params: SlackGateSetKey,
     handler: async ({ botId, key }, context) => {
-      ownersOrcaOnly(context, botId)
+      ownerKeyChange(context, botId)
       await saveSlackGateKey(botId, key)
       return await keyStatus(botId)
     }
@@ -132,7 +130,7 @@ export const BOT_SLACK_GATE_METHODS = [
     permission: 'workspace',
     params: SlackGateBot,
     handler: async ({ botId }, context) => {
-      ownersOrcaOnly(context, botId)
+      ownerKeyChange(context, botId)
       await clearSlackGateKey(botId)
       return await keyStatus(botId)
     }
