@@ -91,7 +91,7 @@ fork/rebase-onto-release.sh v1.4.276 --release 1
 - 안전장치: 지금 main의 포크 커밋(main의 기반 릴리즈 태그 위의 커밋) 중 새 대상에 없는 것은 다음일 때만 통과한다 — 재생성 커밋, 새 스택이나 새 업스트림 기반에 patch-id가 같은 커밋이 있고 그 커밋이 바꾼 모든 경로의 내용이 새 대상과 똑같음, 또는 사람이 `--confirm-ported`/`--confirm-upstream`으로 확인함. 아니면 멈춘다. main에 merge 커밋이 있거나, main의 기반이 더 새 릴리즈거나, 원격 주소(insteadOf까지 펼친 실제 fetch·push 주소)가 vbalien/orca·stablyai/orca가 아니면 멈춘다.
 - 기록: `~/orca-fork-build/main-history.log`에 시도(attempt: 이전·새 SHA, 사라지는 커밋마다 `원본:판정 방식:대응 커밋` 전체 SHA)와 결과(confirmed·unchanged·unknown, 관측 SHA)를 남긴다. 되돌리는 명령은 성공 때 출력된다: `git push --no-follow-tags --force-with-lease=refs/heads/main:<새> origin <이전>:refs/heads/main`.
 - main을 처음 이렇게 바꾸기 전의 main(업스트림 main + PR #1~#4)은 `archive/main-before-release-base`(4384f615d)에 남아 있다.
-- 주인 클론 맞추기(작업 트리가 깨끗하고 로컬 main에 원격에 없는 커밋이 없을 때만): `git -C ~/workspaces/orca fetch origin && git -C ~/workspaces/orca status --short && git -C ~/workspaces/orca log --oneline origin/main..main` 가 둘 다 비어 있으면 `git -C ~/workspaces/orca checkout main && git -C ~/workspaces/orca reset --hard origin/main`. 로컬 전용 커밋이 있으면 먼저 브랜치로 남긴다(`git -C ~/workspaces/orca branch keep-main-<날짜> main`).
+- 주인 클론 맞추기(작업 트리가 깨끗하고 로컬 main에 원격 어디에도 없는 커밋이 없을 때만): `git -C ~/workspaces/orca fetch origin && git -C ~/workspaces/orca status --short && git -C ~/workspaces/orca log --oneline main --not origin/main origin/archive/main-before-release-base` 가 둘 다 비어 있으면(예전 main의 커밋은 보존 브랜치에 있으므로 빼고 본다) `git -C ~/workspaces/orca checkout main && git -C ~/workspaces/orca reset --hard origin/main`. 로컬 전용 커밋이 있으면 먼저 브랜치로 남긴다(`git -C ~/workspaces/orca branch keep-main-<날짜> main`).
 
 ## 한계
 
