@@ -1,4 +1,4 @@
-// `bots.slackGate.*`: a bot's Slack wake gate and its key, changed by the owner's Orca, here or
+// `bots.slackGate.*`: a bot's Slack wake gate and its keys, changed by the owner's Orca, here or
 // paired (never an agent's CLI); a gate's command changes only on the bot's computer.
 import * as z from 'zod'
 import { BotSlackGateSchema } from '../bots/bot-slack-gate'
@@ -17,5 +17,10 @@ export const SlackGateSetKey = z.object({
     .regex(/^[\x21-\x7e]{1,512}$/, 'An API key is one line of printable characters')
 })
 
-/** What a client may know about the key: whether one is saved, never the key. */
-export type SlackGateKeyStatus = { apiKeySet: boolean; sealing: 'os-keychain' | 'unavailable' }
+/** What a client may know about the keys: whether each is saved, never a key. Older hosts send no
+ *  `openaiKeySet`. */
+export type SlackGateKeyStatus = {
+  apiKeySet: boolean
+  openaiKeySet?: boolean
+  sealing: 'os-keychain' | 'unavailable'
+}

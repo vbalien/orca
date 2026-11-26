@@ -1,29 +1,30 @@
-// A Jev config's rules over its answers: each rule passes, fails or is unsure; unsure leans the way
+// A gate config's rules over its answers: each rule passes, fails or is unsure; unsure leans the way
 // `whenUnsure` says; any block rule that passes blocks; otherwise the wake rules combine all/any.
 import type {
-  SlackGateJevCondition,
-  SlackGateJevConfig,
-  SlackGateJevRule
-} from '../../../shared/bots/slack-gate-jev-config'
-import type { SlackGateJevAnswer } from './slack-gate-jev'
+  SlackGateChoiceValue,
+  SlackGateCondition,
+  SlackGateRule,
+  SlackGateRulesConfig
+} from '../../../shared/bots/slack-gate-rules-config'
+import type { SlackGateAnswer } from './slack-gate-openai'
 
-export type SlackGateJevRuleResult = 'pass' | 'fail' | 'unsure'
+export type SlackGateRuleResult = 'pass' | 'fail' | 'unsure'
 
-export type SlackGateJevVerdict = {
+export type SlackGateRulesVerdict = {
   wake: boolean
-  /** Each question's answer: a noul or score number, or a choice name (never message text). */
-  answers: Record<string, number | string>
+  /** Each question's answer: a probability or score, or a choice's value (never message text). */
+  answers: Record<string, number | SlackGateChoiceValue>
   /** Each rule's result, by its index. */
-  rules: SlackGateJevRuleResult[]
+  rules: SlackGateRuleResult[]
   /** The first rule's question's number, when it has one. */
   score?: number
 }
 
 function conditionResult(
-  condition: SlackGateJevCondition,
+  condition: SlackGateCondition,
   unsureFrom: number | undefined,
-  answer: SlackGateJevAnswer
-): SlackGateJevRuleResult {
+  answer: SlackGateAnswer
+): SlackGateRuleResult {
   if ('oneOf' in condition) {
     return answer.type === 'choice' && condition.oneOf.includes(answer.value) ? 'pass' : 'fail'
   }
@@ -44,21 +45,21 @@ function conditionResult(
 }
 
 function ruleResult(
-  rule: SlackGateJevRule,
-  answers: Record<string, SlackGateJevAnswer>
-): SlackGateJevRuleResult {
+  rule: SlackGateRule,
+  answers: Record<string, SlackGateAnswer>
+): SlackGateRuleResult {
   const condition = rule.wakeIf ?? rule.blockIf
   const answer = answers[rule.question]
   return condition && answer ? conditionResult(condition, rule.unsureFrom, answer) : 'fail'
 }
 
-export function decideSlackGateJevRules(
-  config: SlackGateJevConfig,
-  answers: Record<string, SlackGateJevAnswer>
-): SlackGateJevVerdict {
+export function decideSlackGateRules(
+  config: SlackGateRulesConfig,
+  answers: Record<string, SlackGateAnswer>
+): SlackGateRulesVerdict {
   const results = config.rules.map((rule) => ruleResult(rule, answers))
   const unsureWakes = config.whenUnsure === 'wake'
-  const counts = (result: SlackGateJevRuleResult, lean: boolean) =>
+  const counts = (result: SlackGateRuleResult, lean: boolean) =>
     result === 'pass' || (result === 'unsure' && lean)
   const blocked = config.rules.some(
     (rule, index) => rule.blockIf && counts(results[index]!, !unsureWakes)

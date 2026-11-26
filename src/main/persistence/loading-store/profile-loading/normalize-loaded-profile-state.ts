@@ -11,6 +11,7 @@ import { normalizeWorkspaceLineageByChildKey } from '../../applying-settings/ui-
 import { dropInferredParentsOverFolderParents } from '../workspace-lineage/folder-parent-lineage-persistence'
 import { normalizeCrossStoreLineageByChildKey } from '../../../../shared/worktree/lineage/cross-store-lineage-records'
 import { normalizePersistedBots, splitBotsByOlderBuildSupport } from '../../../../shared/bot-types'
+import { hasRetiredJevGate } from '../../../../shared/bots/bot-slack-gate'
 import {
   markImmutableBotSnapshot,
   orderBotsBySavedOrder
@@ -54,13 +55,18 @@ export function normalizeLoadedProfileState(
   const parsedBotOrder = Array.isArray(parsed.botOrder)
     ? parsed.botOrder.filter((id): id is string => typeof id === 'string')
     : undefined
+  const storedBots = [
+    ...(Array.isArray(parsed.bots) ? parsed.bots : []),
+    ...(Array.isArray(parsed.botsNewerAgents) ? parsed.botsNewerAgents : [])
+  ]
+  // A retired Jev gate is dropped on disk too, so an older build can't run it again after a rollback.
+  if (storedBots.some(hasRetiredJevGate)) {
+    markNeedsSave()
+  }
   const normalizedBots =
     parsed.bots === undefined && parsed.botsNewerAgents === undefined
       ? undefined
-      : normalizePersistedBots([
-          ...(Array.isArray(parsed.bots) ? parsed.bots : []),
-          ...(Array.isArray(parsed.botsNewerAgents) ? parsed.botsNewerAgents : [])
-        ])
+      : normalizePersistedBots(storedBots)
   const allBots =
     normalizedBots && parsedBotOrder
       ? orderBotsBySavedOrder(normalizedBots, parsedBotOrder)

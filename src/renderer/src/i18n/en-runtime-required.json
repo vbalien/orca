@@ -1877,6 +1877,13 @@
           "mention": "Mentions",
           "threadReply": "Replies in its threads",
           "trigger": "Automation events"
+        },
+        "rules": {
+          "example": {
+            "default": "Default: skip replies not meant for the bot",
+            "smallTalk": "Block small talk",
+            "topic": "Topic and urgency"
+          }
         }
       },
       "postAs": {

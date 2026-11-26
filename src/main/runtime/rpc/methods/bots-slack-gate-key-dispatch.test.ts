@@ -110,3 +110,30 @@ it('saves a key from a person’s paired computer, refuses the CLI there, and ne
   expect(logged.some((line) => line.includes(MARK))).toBe(false)
   expect(events.some(leaks)).toBe(false)
 })
+
+it('keeps the OpenAI key in its own slot, under the same rules, and never echoes it', async () => {
+  const OPENAI_MARK = 'QX4OPENAI27'
+  const OPENAI_KEY = `sk-proj-${OPENAI_MARK}`
+  const answers = [
+    await dispatch('bots.slackGate.setOpenAIKey', { botId: 'b1', key: OPENAI_KEY }, AGENT),
+    await dispatch('bots.slackGate.setKey', { botId: 'b1', key: KEY }, PERSON),
+    await dispatch('bots.slackGate.setOpenAIKey', { botId: 'b1', key: OPENAI_KEY }, PERSON)
+  ]
+  expect(answers.map((answer) => answer.ok)).toEqual([false, true, true])
+  expect(answers[2]).toMatchObject({
+    result: { apiKeySet: true, openaiKeySet: true, sealing: 'os-keychain' }
+  })
+  expect(await readSlackGateKey('b1', 'command')).toBe(KEY)
+  expect(await readSlackGateKey('b1', 'openai')).toBe(OPENAI_KEY)
+  answers.push(await dispatch('bots.slackGate.clearOpenAIKey', { botId: 'b1' }, AGENT))
+  expect(await readSlackGateKey('b1', 'openai')).toBe(OPENAI_KEY)
+  const cleared = await dispatch('bots.slackGate.clearOpenAIKey', { botId: 'b1' }, PERSON)
+  expect(cleared).toMatchObject({ ok: true, result: { apiKeySet: true, openaiKeySet: false } })
+  expect(await readSlackGateKey('b1', 'command')).toBe(KEY)
+  answers.push(cleared, await dispatch('bots.slackGate.status', { botId: 'b1' }, PERSON))
+  await vi.runAllTimersAsync()
+  const leaked = (value: unknown) => JSON.stringify(value).includes(OPENAI_MARK)
+  expect(answers.some(leaked) || answers.some(leaks)).toBe(false)
+  expect(logged.some((line) => line.includes(OPENAI_MARK) || line.includes(MARK))).toBe(false)
+  expect(events.some(leaked)).toBe(false)
+})

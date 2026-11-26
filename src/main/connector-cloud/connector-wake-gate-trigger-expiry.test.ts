@@ -43,11 +43,11 @@ const bots = [
     paused: false,
     slackGate: {
       on: true,
-      kind: 'jev' as const,
+      kind: 'command' as const,
       appliesTo: ['trigger' as const],
       timeoutSeconds: 5,
       onError: 'wake' as const,
-      jev: { question: 'Should the bot run?', threshold: 0.5 }
+      command: 'should-the-bot-run'
     }
   }
 ]

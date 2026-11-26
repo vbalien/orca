@@ -1,4 +1,4 @@
-// The Slack wake gate card alone, at the connector page's width, in both runner kinds and in Korean.
+// The Slack wake gate card alone, at the connector page's width, in both kinds and in Korean.
 import { i18n, loadRendererUiLanguage } from '@/i18n/i18n'
 import type { UiLanguage } from '../../../../../shared/i18n/ui-language'
 import { defineFixture } from '../../../component-fixtures/component-fixture'
@@ -6,14 +6,15 @@ import type { Bot } from '../../../../../shared/bot-types'
 import type { BotSlackGate } from '../../../../../shared/bots/bot-slack-gate'
 import { slackOnly } from '../bot-connectors-host-fixture'
 import { BotSlackGateCard } from './BotSlackGateCard'
+import { SLACK_GATE_DEFAULT_RULES } from '../../../../../shared/bots/slack-gate-default-rules'
 
-const jev: BotSlackGate = {
+const openai: BotSlackGate = {
   on: true,
-  kind: 'jev',
+  kind: 'openai',
   appliesTo: ['thread_reply', 'trigger'],
   timeoutSeconds: 10,
   onError: 'wake',
-  jev: { question: 'Is this message a request this bot should answer?', threshold: 0.6 }
+  openai: SLACK_GATE_DEFAULT_RULES
 }
 const command: BotSlackGate = {
   on: true,
@@ -32,7 +33,7 @@ function answerKeyStatus(apiKeySet: boolean): void {
           id: 'slack-gate-status',
           ok: true,
           _meta: { runtimeId: 'fixture' },
-          result: { apiKeySet, sealing: 'os-keychain' }
+          result: { apiKeySet, openaiKeySet: apiKeySet, sealing: 'os-keychain' }
         }
       : call(args)
 }
@@ -60,7 +61,7 @@ const card = (
   })
 
 export const off = card(undefined)
-export const jevWithKey = card(jev, { key: true })
+export const openaiWithKey = card(openai, { key: true })
 export const commandGate = card(command)
-export const koreanJev = card(jev, { language: 'ko' })
+export const koreanOpenAI = card(openai, { language: 'ko' })
 export const koreanCommand = card(command, { language: 'ko', key: true })
