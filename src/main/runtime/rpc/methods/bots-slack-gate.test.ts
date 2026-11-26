@@ -193,13 +193,17 @@ describe('bots.slackGate key methods', () => {
     expect(await call('bots.slackGate.setKey', { botId: 'b1', key: 'secret' }, context)).toEqual({
       apiKeySet: true,
       openaiKeySet: false,
-      sealing: 'os-keychain'
+      sealing: 'os-keychain',
+      features: ['channelMessages', 'rulesCommand', 'ruleLimits'],
+      pendingWakes: { pending: 0 }
     })
     expect(await readSlackGateKey('b1')).toBe('secret')
     expect(await call('bots.slackGate.clearKey', { botId: 'b1' }, context)).toEqual({
       apiKeySet: false,
       openaiKeySet: false,
-      sealing: 'os-keychain'
+      sealing: 'os-keychain',
+      features: ['channelMessages', 'rulesCommand', 'ruleLimits'],
+      pendingWakes: { pending: 0 }
     })
     expect(await readSlackGateKey('b1')).toBeNull()
     await expect(

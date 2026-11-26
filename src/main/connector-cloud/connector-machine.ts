@@ -57,7 +57,14 @@ export type ConnectorMachine = {
     delivery: Extract<ConnectorDelivery, { kind: 'start' | 'send' }>,
     later: readonly Extract<ConnectorDelivery, { kind: 'send' }>[],
     deadlineAt: number
-  ) => ConversationAdmission | undefined
+  ) =>
+    | (ConversationAdmission & {
+        /** What it found worth telling the chat, once it let the delivery go on. */
+        note?: () => string | undefined
+        /** How the delivery went: a limited rule's count is kept or given back. */
+        settled?: (outcome: string) => void
+      })
+    | undefined
   /** Whether a send must not ride a start or send's turn, because a wake gate judges them apart. */
   wakeGateApart?: (
     head: Extract<ConnectorDelivery, { kind: 'start' | 'send' }>,

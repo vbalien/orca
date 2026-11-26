@@ -30,7 +30,10 @@ import {
   SLACK_GATE_RULES_EXAMPLES,
   type SlackGateRulesExample
 } from '../../../../../../shared/bots/slack-gate-default-rules'
-import { SLACK_GATE_SAMPLE_EVENT } from './slack-gate-rules-examples'
+import {
+  SLACK_GATE_SAMPLE_CHANNEL_EVENT,
+  SLACK_GATE_SAMPLE_EVENT
+} from './slack-gate-rules-examples'
 import { slackGateRulesIssueText } from './slack-gate-rules-issue-text'
 
 function Disclosure(props: { title: string; children: React.ReactNode }): React.JSX.Element {
@@ -78,6 +81,11 @@ function JsonText(props: {
 
 const EXAMPLE_LABELS: Record<SlackGateRulesExample['id'], [string, string]> = {
   default: ['bots.slack.gate.rules.example.default', 'Default: skip replies not meant for the bot'],
+  channel: ['bots.slack.gate.rules.example.channel', 'Channel messages: only what asks the bot'],
+  banter: [
+    'bots.slack.gate.rules.example.banter',
+    'Channel messages, and casual chat a few times a day'
+  ],
   smallTalk: ['bots.slack.gate.rules.example.smallTalk', 'Block small talk'],
   topic: ['bots.slack.gate.rules.example.topic', 'Topic and urgency']
 }
@@ -91,9 +99,14 @@ export function BotSlackGateRulesEditor(props: {
   const id = useId()
   const statusId = `${id}-status`
   const [wide, setWide] = useState(false)
+  const [previewChannel, setPreviewChannel] = useState(false)
   const parsed = useMemo(() => parseSlackGateRulesText(props.text), [props.text])
   const request = parsed.ok
-    ? slackGateOpenAIRequest(parsed.config, { name: props.botName }, SLACK_GATE_SAMPLE_EVENT)
+    ? slackGateOpenAIRequest(
+        parsed.config,
+        { name: props.botName },
+        previewChannel ? SLACK_GATE_SAMPLE_CHANNEL_EVENT : SLACK_GATE_SAMPLE_EVENT
+      )
     : null
   const status = (elementId: string) =>
     parsed.ok ? (
@@ -189,12 +202,20 @@ export function BotSlackGateRulesEditor(props: {
             <li>
               {t(
                 'bots.slack.gate.rules.helpRules',
-                '"rules": { "question", "wakeIf" or "blockIf": { "atLeast" | "atMost": n } or { "oneOf": [choices] }, optional "unsureFrom": n }. Any passing blockIf blocks; wakeIf rules combine by "combine" (all | any); "whenUnsure" (block | wake) decides the band between unsureFrom and the limit.'
+                '"rules": { "question", "wakeIf" or "blockIf": { "atLeast" | "atMost": n } or { "oneOf": [choices] }, optional "unsureFrom": n, "note": why it wakes (told to the bot), "limit": { "perDay", "cooldownMinutes", "chance" } }. Any passing blockIf blocks; wakeIf rules combine by "combine" (all | any); "whenUnsure" (block | wake) decides the band between unsureFrom and the limit, except that a channel message never wakes on an unsure answer. A limit counts per channel and rule, a local day from midnight on the bot’s computer; limits count on your own Slack app and for automation events.'
               )}
             </li>
           </ul>
         </Disclosure>
         <Disclosure title={t('bots.slack.gate.rules.preview', 'Request preview')}>
+          <label className="mb-1 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={previewChannel}
+              onChange={(event) => setPreviewChannel(event.target.checked)}
+            />
+            {t('bots.slack.gate.rules.previewChannel', 'Preview a channel message')}
+          </label>
           {request ? (
             <pre className="max-h-64 overflow-auto scrollbar-sleek rounded-md bg-muted p-2 font-mono text-3xs">
               {formatSlackGateRulesText(request)}

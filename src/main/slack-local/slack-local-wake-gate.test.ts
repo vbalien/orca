@@ -84,7 +84,11 @@ function harness(
   }
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the calls this path makes.
   const seam = {
-    linkedChat: () => (options.linked ? { worktreeId: 'wt', sessionId: 's' } : null),
+    // An ordinary chat only: no channel-message chat (`:c`) in these threads.
+    linkedChat: (key: { externalId: string }) =>
+      options.linked && !key.externalId.endsWith(':c')
+        ? { worktreeId: 'wt', sessionId: 's' }
+        : null,
     start: async (_host: unknown, key: unknown, _id: string, input: { prompt: string }) => {
       calls.push({ kind: 'start', text: input.prompt })
       return { conversation: key, initial: { outcome: 'accepted' } }

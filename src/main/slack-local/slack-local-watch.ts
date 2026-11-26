@@ -2,6 +2,7 @@
 // events go to the running connection of the bot that owns the thread, and to no other.
 import {
   isLocalSlackConversation,
+  localSlackConversation,
   parseLocalSlackConversation
 } from '../../shared/connectors/local-slack-conversation'
 import type { ConversationEvent } from '../external-conversations/external-conversation-events'
@@ -61,8 +62,35 @@ export class SlackLocalWatch {
       return
     }
     const botId = findLink(this.deps.store, event.conversation)?.link.bot?.botId
-    if (botId && parseLocalSlackConversation(event.conversation.externalId)) {
-      this.deps.deliver(botId, event)
+    const place = parseLocalSlackConversation(event.conversation.externalId)
+    if (!botId || !place) {
+      return
     }
+    // A channel-message chat whose thread has an ordinary chat too (an older Orca opened it) says
+    // nothing more there: the ordinary one is the thread's.
+    if (place.channel && !canonicalLocalChat(this.deps.store, event.conversation.externalId)) {
+      console.warn('[slack-local] a thread had two chats; the channel-message one stays quiet')
+      return
+    }
+    this.deps.deliver(botId, event)
   }
+}
+
+/** Whether a local conversation is its thread's chat: an ordinary one always, a channel-message one
+ *  (`:c`) only while it is linked and no ordinary chat of the same bot has the thread. */
+export function canonicalLocalChat(
+  store: ExternalConversationLinkStore,
+  externalId: string
+): boolean {
+  const place = parseLocalSlackConversation(externalId)
+  if (!place) {
+    return false
+  }
+  if (!place.channel) {
+    return true
+  }
+  const own = findLink(store, { source: 'slack-local', externalId })
+  const { channel: _channel, ...ordinary } = place
+  const normal = findLink(store, localSlackConversation(ordinary))
+  return own !== null && !(normal && normal.link.bot?.botId === own.link.bot?.botId)
 }

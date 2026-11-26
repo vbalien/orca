@@ -241,7 +241,12 @@ import {
   BotShareStatusParams,
   BotShareStop
 } from './bots-share-params'
-import { SlackGateBot, SlackGateSet, SlackGateSetKey } from './bots-slack-gate-params'
+import {
+  SlackGateBot,
+  SlackGateSet,
+  SlackGateSetKey,
+  SlackGateStore
+} from './bots-slack-gate-params'
 import {
   BotSlackLocalAskers,
   BotSlackLocalBot,
@@ -1393,11 +1398,13 @@ export const RPC_PARAMS_BY_METHOD = {
   'bots.slack.state': BotSlackBot,
   'bots.slackGate.clearKey': SlackGateBot,
   'bots.slackGate.clearOpenAIKey': SlackGateBot,
+  'bots.slackGate.restore': SlackGateBot,
   'bots.slackGate.save': SlackGateSet,
   'bots.slackGate.set': SlackGateSet,
   'bots.slackGate.setKey': SlackGateSetKey,
   'bots.slackGate.setOpenAIKey': SlackGateSetKey,
   'bots.slackGate.status': SlackGateBot,
+  'bots.slackGate.store': SlackGateStore,
   'bots.slackLocal.addAskers': BotSlackLocalAskers,
   'bots.slackLocal.setOwner': BotSlackLocalOwner,
   'bots.slackLocal.setTokens': BotSlackLocalTokens,

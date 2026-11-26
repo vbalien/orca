@@ -100,22 +100,27 @@ export function lineOfPath(text: string, tree: Node, path: SlackGateRulesPath): 
   return 1
 }
 
-export function parseSlackGateRulesText(text: string): SlackGateRulesTextResult {
+/** Strict JSON as the gate reads it from a person or a script: size and nesting checked first, no
+ *  comments or trailing commas, duplicate keys refused. */
+export function parseStrictJsonText(
+  text: string
+): { ok: true; value: unknown; tree: Node } | { ok: false; issue: SlackGateRulesTextIssue } {
   if (new TextEncoder().encode(text).length > SLACK_GATE_RULES_TEXT_MAX_BYTES) {
     return {
       ok: false,
-      issues: [
-        { path: [], code: 'text_too_large', params: { max: SLACK_GATE_RULES_TEXT_MAX_BYTES } }
-      ]
+      issue: { path: [], code: 'text_too_large', params: { max: SLACK_GATE_RULES_TEXT_MAX_BYTES } }
     }
   }
   const deep = tooDeepAt(text)
   if (deep !== null) {
     return {
       ok: false,
-      issues: [
-        { path: [], code: 'too_deep', params: { max: TEXT_MAX_DEPTH }, line: lineAt(text, deep) }
-      ]
+      issue: {
+        path: [],
+        code: 'too_deep',
+        params: { max: TEXT_MAX_DEPTH },
+        line: lineAt(text, deep)
+      }
     }
   }
   const errors: ParseError[] = []
@@ -133,29 +138,34 @@ export function parseSlackGateRulesText(text: string): SlackGateRulesTextResult 
     const first = errors[0]
     return {
       ok: false,
-      issues: [{ path: [], code: 'syntax', line: lineAt(text, first?.offset ?? 0) }]
+      issue: { path: [], code: 'syntax', line: lineAt(text, first?.offset ?? 0) }
     }
   }
   const duplicate = duplicateKey(tree)
   if (duplicate) {
     return {
       ok: false,
-      issues: [
-        {
-          path: [],
-          code: 'duplicate_key',
-          params: { key: duplicate.key },
-          line: lineAt(text, duplicate.offset)
-        }
-      ]
+      issue: {
+        path: [],
+        code: 'duplicate_key',
+        params: { key: duplicate.key },
+        line: lineAt(text, duplicate.offset)
+      }
     }
   }
-  let value: unknown
   try {
-    value = getNodeValue(tree)
+    return { ok: true, value: getNodeValue(tree), tree }
   } catch {
-    return { ok: false, issues: [{ path: [], code: 'syntax', line: 1 }] }
+    return { ok: false, issue: { path: [], code: 'syntax', line: 1 } }
   }
+}
+
+export function parseSlackGateRulesText(text: string): SlackGateRulesTextResult {
+  const parsed = parseStrictJsonText(text)
+  if (!parsed.ok) {
+    return { ok: false, issues: [parsed.issue] }
+  }
+  const { value, tree } = parsed
   const result = validateSlackGateRules(value)
   if (result.ok) {
     return result

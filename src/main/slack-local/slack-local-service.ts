@@ -13,7 +13,9 @@ import type { SlackLocalSecrets, SlackLocalTokenStore } from './slack-local-toke
 import { slackBotIdentity, SlackApiError, type SlackFetch } from './slack-web-api'
 import { repairLocalIdentity, SlackLocalConfig } from './slack-local-config'
 import { slackLocalConnection, type SlackLocalRunning } from './slack-local-connection'
-import { SlackLocalWatch } from './slack-local-watch'
+import { canonicalLocalChat, SlackLocalWatch } from './slack-local-watch'
+import { SlackLocalParticipations } from './slack-local-participation'
+import { findLink } from '../external-conversations/external-conversation-links'
 import { SlackLocalAnswers } from './slack-local-answers'
 import {
   slackLocalStatus,
@@ -59,6 +61,10 @@ export class SlackLocalService {
   // Bumped whenever a bot's connection is let go, so a load already under way doesn't connect.
   private readonly generations = new Map<string, number>()
   private known = new Set<string>()
+  // Read lazily: deps is set by the time a link is looked up.
+  private readonly participations = new SlackLocalParticipations(
+    (externalId) => findLink(this.deps.store, { source: 'slack-local', externalId }) !== null
+  )
 
   readonly config: SlackLocalConfig
 
@@ -75,7 +81,9 @@ export class SlackLocalService {
         if (this.replyErrors.delete(botId)) {
           this.changed()
         }
-      }
+      },
+      participation: (botId) => this.participations.of(botId),
+      canPost: (_botId, externalId) => canonicalLocalChat(deps.store, externalId)
     })
     this.watch = new SlackLocalWatch({
       runtime: deps.runtime,
@@ -95,6 +103,7 @@ export class SlackLocalService {
           this.answers.drop(botId)
           this.problems.delete(botId)
           this.replyErrors.delete(botId)
+          this.participations.forget(botId)
         },
         reconcile: () => this.reconcile(),
         restart: (botId) => this.restart(botId)
@@ -157,6 +166,7 @@ export class SlackLocalService {
         void this.deps.tokens.remove(botId).catch(() => undefined)
         this.problems.delete(botId)
         this.replyErrors.delete(botId)
+        this.participations.forget(botId)
       }
     }
     this.known = present
@@ -242,6 +252,7 @@ export class SlackLocalService {
 
   private connect(botId: string, secrets: SlackLocalSecrets): void {
     const running = slackLocalConnection({
+      participation: this.participations.of(botId),
       secrets,
       fetch: this.fetch,
       runtime: this.deps.runtime,

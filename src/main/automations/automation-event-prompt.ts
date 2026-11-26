@@ -102,7 +102,9 @@ const ASKER_LINES: Record<AutomationEventAsker, string> = {
 export function automationRunPrompt(
   prompt: string,
   event: AutomationRunEvent | undefined,
-  asker: AutomationEventAsker | null = null
+  asker: AutomationEventAsker | null = null,
+  /** Orca's word from the Slack wake gate that let the event through (its own lines, quoted reason). */
+  gateNote?: string
 ): string {
   if (!event) {
     return prompt
@@ -112,7 +114,8 @@ export function automationRunPrompt(
     ...(event.source === 'slack' ? slackLines(event) : []),
     ...(event.webhook ? webhookLines(event.webhook) : []),
     ...googleLines(event),
-    ...(asker ? [ASKER_LINES[asker]] : [])
+    ...(asker ? [ASKER_LINES[asker]] : []),
+    ...(gateNote ? [gateNote] : [])
   ].join('\n')
   // Anyone in the place may start a run, so the text says whose it is.
   const text = event.text?.slice(0, MAX_AUTOMATION_EVENT_TEXT_LENGTH)

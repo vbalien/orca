@@ -20,84 +20,56 @@ import { botRefKey, callBotRpc } from '@/lib/bot-hosts'
 import { isWindowsDesktopClient } from '@/lib/files/os-open/windows-path-access'
 import type { Bot } from '../../../../../shared/bot-types'
 import {
-  BotSlackGateSchema,
   SLACK_GATE_CASES,
+  SLACK_GATE_CHANNELS_MAX,
   SLACK_GATE_MAX_TIMEOUT_SECONDS,
-  type BotSlackGate,
-  type SlackGateCase
+  type BotSlackGateEdit,
+  type SlackGateSettingCase
 } from '../../../../../shared/bots/bot-slack-gate'
 import {
   formatSlackGateRulesText,
   parseSlackGateRulesText
 } from '../../../../../shared/bots/slack-gate-rules-text'
+import { channelIdsOf, draftOf, gateOf, knownGate, type SlackGateDraft } from './slack-gate-draft'
+import { BotSlackGateKeyField } from './BotSlackGateKeyField'
+import { BotSlackGateScriptField } from './BotSlackGateScriptField'
+import { BotSlackGateChannelField } from './BotSlackGateChannelField'
+import {
+  slackGateRulesExtended,
+  slackGateRulesSends
+} from '../../../../../shared/bots/slack-gate-rules-config'
+import { isBlockAllStandIn } from '../../../../../shared/bots/slack-gate-store-form'
+import { usesLocalSlack } from '../../../../../shared/bots/bot-slack-connection'
 import { BotSlackGateRulesEditor } from './rules/BotSlackGateRulesEditor'
-import { SLACK_GATE_DEFAULT_RULES } from '../../../../../shared/bots/slack-gate-default-rules'
+import {
+  SLACK_GATE_CHANNEL_DEFAULT_RULES,
+  SLACK_GATE_DEFAULT_RULES
+} from '../../../../../shared/bots/slack-gate-default-rules'
 import { callSlackGateHost, saveSlackGate, SlackGateHostTooOldError } from './rules/slack-gate-save'
+import { useBotAccessPlace } from '../use-bot-access-place'
 import type { SlackGateKeyStatus } from '../../../../../shared/rpc-contract/bots-slack-gate-params'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../../shared/execution-host/execution-host'
 import { BotConnectorSection } from '../bot-connector-people'
 
-type Draft = {
-  on: boolean
-  kind: BotSlackGate['kind']
-  appliesTo: SlackGateCase[]
-  timeoutSeconds: number
-  onError: BotSlackGate['onError']
-  command: string
-  rulesText: string
-}
-
-/** A gate kind this Orca runs; an older host or a kept list can carry another (TypeSafe Jev). */
-function knownGate(gate: Bot['slackGate']): BotSlackGate | null {
-  return gate?.kind === 'openai' || gate?.kind === 'command' ? gate : null
-}
-
-// A new gate is on and checks only thread replies with the default rules (mentions and DMs wake as
-// before), and wakes when the check fails: a missed request costs more than an extra wake.
-function draftOf(saved: Bot['slackGate']): Draft {
-  const gate = knownGate(saved)
-  return {
-    on: gate?.on ?? true,
-    kind: gate?.kind ?? 'openai',
-    appliesTo: gate ? [...gate.appliesTo] : ['thread_reply'],
-    timeoutSeconds: gate?.timeoutSeconds ?? 10,
-    onError: gate?.onError ?? 'wake',
-    command: gate?.kind === 'command' ? gate.command : '',
-    rulesText: formatSlackGateRulesText(
-      gate?.kind === 'openai' ? gate.openai : SLACK_GATE_DEFAULT_RULES
-    )
-  }
-}
-
-function gateOf(draft: Draft): BotSlackGate | null {
-  const common = {
-    on: draft.on,
-    appliesTo: draft.appliesTo,
-    timeoutSeconds: draft.timeoutSeconds,
-    onError: draft.onError
-  }
-  const rules = draft.kind === 'openai' ? parseSlackGateRulesText(draft.rulesText) : null
-  if (rules && !rules.ok) {
-    return null
-  }
-  const parsed = BotSlackGateSchema.safeParse(
-    draft.kind === 'command'
-      ? { ...common, kind: 'command', command: draft.command }
-      : { ...common, kind: 'openai', openai: rules?.config }
-  )
-  return parsed.success ? parsed.data : null
-}
-
 /** Saves the gate (null removes it) on the bot's host, then reads its bots again. */
-async function saveGate(bot: Bot, gate: BotSlackGate | null): Promise<void> {
+async function saveGate(
+  bot: Bot,
+  gate: BotSlackGateEdit | null,
+  hostHasFeatures: boolean
+): Promise<void> {
   try {
-    await saveSlackGate((method, params) => callBotRpc(bot, method, params), bot.id, gate)
+    await saveSlackGate(
+      (method, params) => callBotRpc(bot, method, params),
+      bot.id,
+      gate,
+      hostHasFeatures
+    )
   } finally {
     await refreshBotHost(bot.hostId)
   }
 }
 
-const CASE_LABELS: Record<SlackGateCase, [string, string]> = {
+const CASE_LABELS: Record<SlackGateSettingCase, [string, string]> = {
   mention: ['bots.slack.gate.case.mention', 'Mentions'],
   dm: ['bots.slack.gate.case.dm', 'Direct messages'],
   thread_reply: ['bots.slack.gate.case.threadReply', 'Replies in its threads'],
@@ -108,7 +80,7 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const t = useTranslate()
   // One card per Slack workspace can be mounted at once: ids must be this card's own.
   const id = useId()
-  const [draft, setDraft] = useState<Draft>(() => draftOf(bot.slackGate))
+  const [draft, setDraft] = useState<SlackGateDraft>(() => draftOf(bot.slackGate))
   // The gate as saved; when it changes (a save, a removal, another device) an untouched form follows.
   const saved = bot.slackGate ?? null
   const [seen, setSeen] = useState(saved)
@@ -121,6 +93,10 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
   const [saving, setSaving] = useState(false)
   const [keyStatus, setKeyStatus] = useState<SlackGateKeyStatus | null>(null)
   const commandUnsupported = bot.hostId === LOCAL_EXECUTION_HOST_ID && isWindowsDesktopClient()
+  const place = useBotAccessPlace(bot.hostId)
+  const features = keyStatus?.features ?? []
+  const hostHasFeatures = features.length > 0
+  const localApp = usesLocalSlack(bot)
 
   useEffect(() => {
     let current = true
@@ -133,23 +109,28 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
     }
   }, [bot])
 
-  const set = (patch: Partial<Draft>) => setDraft((before) => ({ ...before, ...patch }))
+  const set = (patch: Partial<SlackGateDraft>) => setDraft((before) => ({ ...before, ...patch }))
   // Parsed once per edit; the editor parses the same text for its messages.
   const gate = useMemo(() => gateOf(draft), [draft])
   const failed = (error: unknown) =>
     toast.error(
       error instanceof SlackGateHostTooOldError
-        ? t(
-            'bots.slack.gate.hostTooOld',
-            'Update Orca on this bot’s computer to use OpenAI Decisions checks.'
-          )
+        ? error.feature === 'openai'
+          ? t(
+              'bots.slack.gate.hostTooOld',
+              'Update Orca on this bot’s computer to use OpenAI Decisions checks.'
+            )
+          : t(
+              'bots.slack.gate.hostTooOldNewer',
+              'Update Orca on this bot’s computer to use channel messages, rules scripts, notes or limits.'
+            )
         : error instanceof Error && error.message
           ? error.message
           : t('bots.slack.gate.saveFailed', 'Could not save the gate.')
     )
-  const save = (next: BotSlackGate | null) => {
+  const save = (next: BotSlackGateEdit | null) => {
     setSaving(true)
-    void saveGate(bot, next).then(
+    void saveGate(bot, next, hostHasFeatures).then(
       () => {
         setSaving(false)
         toast.success(t('bots.slack.gate.saved', 'Gate saved.'))
@@ -161,6 +142,60 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
     )
   }
   const unknownKind = Boolean(bot.slackGate) && !knownGate(bot.slackGate)
+  const savedGate = knownGate(bot.slackGate)
+  // An older Orca saved the gate and kept only the block-everything stand-in for its newer rules.
+  const standIn =
+    savedGate?.kind === 'openai' && !savedGate.newer && isBlockAllStandIn(savedGate.openai)
+  const restore = () => {
+    setSaving(true)
+    void callSlackGateHost(
+      (method, params) => callBotRpc(bot, method, params),
+      'bots.slackGate.restore',
+      { botId: bot.id }
+    )
+      .then(() => refreshBotHost(bot.hostId))
+      .then(
+        () => {
+          setSaving(false)
+          toast.success(t('bots.slack.gate.restored', 'Gate settings restored.'))
+        },
+        (error: unknown) => {
+          setSaving(false)
+          failed(error)
+        }
+      )
+  }
+  const parsedRules = draft.kind === 'openai' ? parseSlackGateRulesText(draft.rulesText) : null
+  const rulesConfig = parsedRules?.ok ? parsedRules.config : null
+  // Rules a failed check can't honor never wake the bot then (plan "확인 실패").
+  const failsClosed =
+    draft.kind === 'openai' &&
+    (draft.rulesCommand.trim().length > 0 ||
+      (rulesConfig !== null && slackGateRulesExtended(rulesConfig).limits))
+  const channelIds = channelIdsOf(draft.channelsText)
+  const channelsInvalid =
+    draft.channelMessages &&
+    (channelIds === null || channelIds.length === 0 || channelIds.length > SLACK_GATE_CHANNELS_MAX)
+  const rulesTellChannel = rulesConfig === null || slackGateRulesSends(rulesConfig).has('case')
+  const setChannelMessages = (on: boolean) => {
+    // Turning channel messages on with the untouched thread rules switches to rules for both.
+    const untouched = draft.rulesText === formatSlackGateRulesText(SLACK_GATE_DEFAULT_RULES)
+    if (on && draft.kind === 'openai' && untouched) {
+      set({
+        channelMessages: true,
+        rulesText: formatSlackGateRulesText(SLACK_GATE_CHANNEL_DEFAULT_RULES)
+      })
+      toast.message(
+        t(
+          'bots.slack.gate.channel.rulesSwitched',
+          'Rules switched to the default for thread replies and channel messages.'
+        )
+      )
+      return
+    }
+    set({ channelMessages: on })
+  }
+  const scriptEditable = place.local && !commandUnsupported
 
   return (
     <BotConnectorSection title={t('bots.slack.gate.title', 'Check before waking')}>
@@ -176,6 +211,13 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             {t(
               'bots.slack.gate.unknownKind',
               'Orca on this bot’s computer uses a check this Orca does not know (such as TypeSafe Jev), and may still run it. Update Orca there, or remove the check.'
+            )}
+          </p>
+        ) : standIn ? (
+          <p className="leading-5 text-muted-foreground">
+            {t(
+              'bots.slack.gate.standIn',
+              'An older Orca saved these rules without its newer settings; until they are back, the check blocks every message it checks.'
             )}
           </p>
         ) : bot.slackGateRetired === 'jev' && !bot.slackGate ? (
@@ -236,7 +278,29 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
               </div>
             )
           })}
+          {localApp || draft.channelMessages ? (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`${id}-channel`}
+                checked={draft.channelMessages}
+                disabled={!hostHasFeatures}
+                onCheckedChange={(checked) => setChannelMessages(checked === true)}
+              />
+              <Label htmlFor={`${id}-channel`}>
+                {t('bots.slack.gate.case.channelMessage', 'Channel messages (your own Slack app)')}
+              </Label>
+            </div>
+          ) : null}
         </fieldset>
+        {draft.channelMessages ? (
+          <BotSlackGateChannelField
+            id={id}
+            value={draft.channelsText}
+            onChange={(channelsText) => set({ channelsText })}
+            invalid={channelsInvalid}
+            rulesTellChannel={rulesTellChannel}
+          />
+        ) : null}
         {draft.kind === 'command' ? (
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`${id}-command`}>{t('bots.slack.gate.command', 'Command')}</Label>
@@ -263,10 +327,27 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
             <p className="leading-5 text-muted-foreground">
               {t('bots.slack.gate.openaiNotice', 'Slack message text is sent to OpenAI.')}
             </p>
+            <BotSlackGateScriptField
+              id={id}
+              value={draft.rulesCommand}
+              onChange={(rulesCommand) => set({ rulesCommand })}
+              editable={scriptEditable}
+              hostHasFeatures={hostHasFeatures}
+              computer={place.computer}
+              lastRun={keyStatus?.scriptRun}
+            />
           </div>
         )}
+        {failsClosed ? (
+          <p className="leading-5 text-muted-foreground">
+            {t(
+              'bots.slack.gate.failsClosed',
+              'With a rules script or limits, a check that fails never wakes the bot, whatever “If the check fails” says.'
+            )}
+          </p>
+        ) : null}
         {/* Keyed by host, bot and kind: a typed key never carries over to another one's slot. */}
-        <GateKeyField
+        <BotSlackGateKeyField
           key={`${botRefKey(bot)}:${draft.kind}`}
           bot={bot}
           kind={draft.kind}
@@ -319,88 +400,13 @@ export function BotSlackGateCard({ bot }: { bot: Bot }): React.JSX.Element {
               {t('bots.slack.gate.remove', 'Remove check')}
             </Button>
           ) : null}
+          {keyStatus?.restorable ? (
+            <Button size="sm" variant="outline" disabled={saving} onClick={restore}>
+              {t('bots.slack.gate.restore', 'Restore settings an older Orca dropped')}
+            </Button>
+          ) : null}
         </div>
       </div>
     </BotConnectorSection>
-  )
-}
-
-const KEY_METHODS = {
-  openai: ['bots.slackGate.setOpenAIKey', 'bots.slackGate.clearOpenAIKey'],
-  command: ['bots.slackGate.setKey', 'bots.slackGate.clearKey']
-} as const
-
-/** The selected kind's key: OpenAI's for an OpenAI check, the command's own for a command. */
-function GateKeyField(props: {
-  bot: Bot
-  kind: BotSlackGate['kind']
-  status: SlackGateKeyStatus | null
-  onStatus: (status: SlackGateKeyStatus) => void
-  onError: (error: unknown) => void
-}): React.JSX.Element {
-  const t = useTranslate()
-  const id = useId()
-  const [input, setInput] = useState('')
-  const [setMethod, clearMethod] = KEY_METHODS[props.kind]
-  const saved =
-    props.kind === 'openai' ? props.status?.openaiKeySet === true : props.status?.apiKeySet === true
-  const unsealed = props.status?.sealing === 'unavailable'
-  const call = async (method: string) => {
-    try {
-      const status = await callSlackGateHost(
-        (name, params) => callBotRpc<SlackGateKeyStatus>(props.bot, name, params),
-        method,
-        { botId: props.bot.id, ...(method === setMethod ? { key: input } : {}) }
-      )
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: both key methods answer a SlackGateKeyStatus.
-      props.onStatus(status as SlackGateKeyStatus)
-      setInput('')
-    } catch (error) {
-      props.onError(error)
-    }
-  }
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={`${id}-key`}>
-        {props.kind === 'openai'
-          ? t('bots.slack.gate.openaiKey', 'OpenAI API key')
-          : t('bots.slack.gate.key', 'API key')}{' '}
-        <span className="font-normal text-muted-foreground">
-          {saved
-            ? t('bots.slack.gate.keySaved', 'Saved')
-            : t('bots.slack.gate.keyMissing', 'Not saved')}
-        </span>
-      </Label>
-      {unsealed ? (
-        <p className="text-muted-foreground">
-          {t(
-            'bots.slack.gate.keyUnsealed',
-            'Saving a key needs the system keychain on this bot’s computer, which it does not offer Orca.'
-          )}
-        </p>
-      ) : null}
-      <div className="flex gap-2">
-        <Input
-          id={`${id}-key`}
-          type="password"
-          autoComplete="off"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!input.trim() || unsealed}
-          onClick={() => void call(setMethod)}
-        >
-          {t('bots.slack.gate.keySave', 'Save key')}
-        </Button>
-        {saved ? (
-          <Button size="sm" variant="ghost" onClick={() => void call(clearMethod)}>
-            {t('bots.slack.gate.keyRemove', 'Remove')}
-          </Button>
-        ) : null}
-      </div>
-    </div>
   )
 }

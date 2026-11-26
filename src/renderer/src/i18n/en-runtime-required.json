@@ -1877,6 +1877,8 @@
         },
         "rules": {
           "example": {
+            "banter": "Channel messages, and casual chat a few times a day",
+            "channel": "Channel messages: only what asks the bot",
             "default": "Default: skip replies not meant for the bot",
             "smallTalk": "Block small talk",
             "topic": "Topic and urgency"

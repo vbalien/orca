@@ -9,7 +9,7 @@ import {
 } from '@orca/process-host/process-tree-termination'
 
 export type SlackGateCommandOutcome =
-  | { kind: 'exit'; code: number | null }
+  | { kind: 'exit'; code: number | null; stdout?: string; stdoutTooLarge?: true }
   | { kind: 'timeout' }
   | { kind: 'cancelled' }
   | { kind: 'error'; error: string }
@@ -71,6 +71,8 @@ export function runSlackGateCommand(input: {
   timeoutMs: number
   signal: AbortSignal
   platform?: NodeJS.Platform
+  /** Read stdout, up to this many bytes (a rules script); more stops it. Otherwise stdout is ignored. */
+  stdoutLimit?: number
 }): SlackGateCommandRun {
   if ((input.platform ?? process.platform) === 'win32') {
     const outcome = { kind: 'error', error: SLACK_GATE_COMMAND_UNSUPPORTED } as const
@@ -95,7 +97,10 @@ export function runSlackGateCommand(input: {
     signal: input.signal,
     detached: true,
     terminationBarrier: true,
-    stdio: ['pipe', 'ignore', 'ignore'],
+    stdio: ['pipe', input.stdoutLimit ? 'pipe' : 'ignore', 'ignore'],
+    ...(input.stdoutLimit
+      ? { maxOutputBytes: input.stdoutLimit + 1, killOnOutputLimit: true }
+      : {}),
     launch: (spec) => {
       const launched = spawnProcess(spec)
       child = launched
@@ -114,7 +119,17 @@ export function runSlackGateCommand(input: {
       if (result.timedOut) {
         return { kind: 'timeout' }
       }
-      return { kind: 'exit', code: rootCode === undefined ? result.code : rootCode }
+      const code = rootCode === undefined ? result.code : rootCode
+      if (!input.stdoutLimit) {
+        return { kind: 'exit', code }
+      }
+      const tooLarge = Buffer.byteLength(result.stdout) > input.stdoutLimit
+      return {
+        kind: 'exit',
+        code,
+        stdout: tooLarge ? '' : result.stdout,
+        ...(tooLarge ? { stdoutTooLarge: true as const } : {})
+      }
     },
     (error: unknown): SlackGateCommandOutcome =>
       input.signal.aborted

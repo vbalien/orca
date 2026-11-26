@@ -24,19 +24,34 @@ export function triggerResult(ran: boolean | 'expired'): ConnectorDeliveryResult
   return ran ? { outcome: 'accepted' } : { outcome: 'refused', reason: 'automation_not_listening' }
 }
 
-/** The host a start or send is delivered through: one that asks its wake gate first, if any. */
+/** The host a start or send is delivered through: one that asks its wake gate first, if any, and
+ *  `settle`, which the dispatch calls with the delivery's result (a limited rule's count). */
 export function gatedHost(
   machine: Pick<ConnectorMachine, 'wakeGate'>,
   host: ExternalConversationHost,
   delivery: ConnectorDelivery,
   later: readonly Send[],
   msLeft: (expiresAt: number) => number
-): ExternalConversationHost {
-  if (delivery.kind !== 'start' && delivery.kind !== 'send') {
-    return host
+): ExternalConversationHost & {
+  settle: <T extends { outcome: string }>(deliver: () => Promise<T>) => Promise<T>
+} {
+  const admit =
+    delivery.kind === 'start' || delivery.kind === 'send'
+      ? machine.wakeGate?.(delivery, later, gateDeadline(delivery, msLeft))
+      : undefined
+  const settle = async <T extends { outcome: string }>(deliver: () => Promise<T>): Promise<T> => {
+    try {
+      const result = await deliver()
+      admit?.settled?.(result.outcome)
+      return result
+    } catch (error) {
+      admit?.settled?.('threw')
+      throw error
+    }
   }
-  const admit = machine.wakeGate?.(delivery, later, gateDeadline(delivery, msLeft))
-  return admit ? { ...host, admit } : host
+  return admit
+    ? { ...host, admit, ...(admit.note ? { admitNote: admit.note } : {}), settle }
+    : { ...host, settle }
 }
 
 /** A send that waits before going on (its muted thread's unmute) keeps the wake gate admission and

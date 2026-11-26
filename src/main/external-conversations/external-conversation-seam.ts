@@ -320,8 +320,12 @@ export class ExternalConversationSeam {
             .askerImages({ botId: chat.bot.botId, conversation: key, asker: message.asker, signal })
             .catch(() => [])
         : []
+    // The admission's word for the chat (a wake gate's reason) goes with Orca's note.
+    const admitNote = host.admitNote?.()
+    const note = admitNote ? [message.note, admitNote].filter(Boolean).join('\n\n') : message.note
     const delivered = await this.side(key).deliveries.deliver(host.chat, key, chat, {
       ...message,
+      ...(note ? { note } : {}),
       signal,
       ...(images.length > 0 ? { images } : {})
     })

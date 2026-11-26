@@ -7,6 +7,7 @@ and GitHub connections keep using Orca Cloud as before.
 This is stage 1. It does:
 
 - take mentions (`@bot …`), direct messages, and replies in threads the bot was asked in;
+- when its wake gate says so, channel messages no one addressed to it (see "Channel messages" below);
 - check Who can ask on the bot's computer (you, and the people you add by Slack member ID);
 - post the bot's final message in the same thread.
 
@@ -91,6 +92,9 @@ Notes:
   personal bot doesn't need.
 - Stage 1 reads `app_mention`, `message.im`, `message.channels` and `message.groups`. The other
   agent events are subscribed already for the next stages and are acknowledged and ignored now.
+- Channel messages need nothing more: `message.channels`/`message.groups` and
+  `channels:history`/`groups:history` are in the manifest from the start, so an app made from it doesn't
+  need to be reinstalled. The bot must be in the channel (`/invite @bot`).
 - Slack says some AI features need a paid plan even though they show on every plan. If Slack asks
   for one, a free Developer Program sandbox workspace works for trying it.
 
@@ -138,3 +142,84 @@ Things worth checking and reporting back:
 
 To go back to Orca Cloud's Slack app: the row's ⋯ menu → **Switch to Orca Cloud's Slack app**. This
 forgets the tokens and the people added for the own app.
+
+## Channel messages
+
+A bot can also look at messages no one addressed to it in channels it is in: a channel's top-level
+message, or a reply in a thread the bot hasn't joined. Its wake gate decides each one, and only what
+the gate passes wakes the bot. It is off until you turn it on, and only in the channels you list.
+
+- In **Check before waking**, tick **Channel messages (your own Slack app)** and enter the channel ids
+  (Slack → the channel's name → Channel ID at the bottom). The page shows ids, not names: showing names
+  needs the `channels:read`/`groups:read` scopes and a reinstall of the app, which this stage avoids.
+- **Every message people on Who can ask post in those channels goes to OpenAI** (or your command) to be
+  decided, one request per message (about 0.0001–0.0002 USD each with the default rules). Messages from
+  people not on Who can ask, from bots and apps, edits, deletes and joins are never sent or decided.
+- **A channel message wakes the bot only when the check passes:** not when the gate is off or the channel
+  isn't listed, not when the check fails (an error, a timeout, a refusal, a missing key — whatever
+  "If the check fails" says; for a mention a missed request is the worse mistake, here an intrusion is),
+  and not on an unsure answer (whatever `whenUnsure` says).
+- Turning it on with the untouched default rules switches them to **rules for thread replies and channel
+  messages** (the `channel` example): the thread question as before, and `asks_the_bot` at 0.9, which
+  passes only messages that speak to the bot by name or ask the room for help with what the bot is for.
+  Say what that is in `extra.botRole`, every name people use for it in `extra.botNames`, and its
+  owner's name in `extra.ownerName` (OpenAI otherwise mixes up similar names).
+- The woken bot is told the message wasn't addressed to it and that, if it isn't its to answer, its whole
+  final message must be `NO_REPLY`: then nothing is posted. The bot posts nothing before its answer (no
+  status, no reaction), so a quiet look leaves no trace.
+- A channel message opens a chat of its own kind (its id ends in `:c`). Until the bot posts in that
+  thread or someone @mentions it there, the thread's replies stay channel messages (checked the same
+  way), and a failed turn or "needs an answer in Orca" isn't posted there. Older Orca builds can't read
+  these chats, so going back to one never turns their threads into unchecked replies.
+- Rules may say how often a rule may wake the bot (`limit`: `perDay`, `cooldownMinutes`, `chance`), per
+  channel and rule; a day starts at local midnight on the bot's computer; counts survive a restart
+  (`bot-slack-gate-wakes/`, no message text). A wake is counted when its chat takes the message, and
+  `NO_REPLY` still counts. With limits (or a rules script), a failed check never wakes the bot.
+
+### Rules from a script
+
+For per-channel rules, an OpenAI gate can run **Rules from a script**: a command run like a command
+gate (on the bot's computer, `/bin/sh -c` in a temporary folder, no key in its environment), once per
+message the gate checks. It reads the event as JSON on stdin — a command gate's input (`case`,
+`channelId`, `from`, `text`, `context` …) plus `wakes`, this channel's limit counts keyed by
+`sha256(question name)` (first 16 hex digits) — and prints one JSON object:
+
+- `{"useSaved": true}`: use the rules saved in the editor;
+- `{"wake": true, "reason": "…"}` or `{"wake": false}`: decide now (the reason, one short line, is told
+  to the bot);
+- `{"ask": { …rules… }}`: rules the editor would accept; Orca asks OpenAI with the saved key and applies
+  them as if saved (checks, timeout, limits, logs without text). A rule's `note` becomes the reason.
+
+Anything else, a non-zero exit, more than 64 KiB or a timeout is a failed check, which never wakes the
+bot. The script and OpenAI share the gate's time limit; each message costs one process and (for `ask`)
+one OpenAI call. A rule's question name is how its limit is counted: keep it the same from message to
+message. Logs keep no question names, choices or answers of script-made rules.
+
+The script is a file on the bot's computer, so only that computer's Orca can set or change it (a paired
+computer shows it read-only; an agent's CLI can't change the gate). **Keep it outside the bot's folders**:
+the bot's agent runs as the same user and could edit it. `fork/gate-rules-script/channel-rules.mjs` is a
+starting point (per-channel roles, name matching, a banter limit), and `fork/gate-rules-script/try.ts`
+runs a script on a sample event the way Orca does.
+
+A command gate can already tell channels apart: its stdin JSON has `channelId` and `case`, e.g.
+
+```sh
+#!/bin/sh
+# Wake only for C0123456789; exit 0 wakes, exit 1 doesn't.
+jq -e '.channelId == "C0123456789"' >/dev/null
+```
+
+### Going back to an older Orca
+
+A gate with limits or a rules script is stored so that builds before this one block every message
+they check (they can't honor a limit), and they don't read channel-message chats or channel settings.
+If an older Orca rewrites the gate, the page offers **Restore settings an older Orca dropped** as long as
+the gate is still what that build left.
+
+## Channel messages through Orca Cloud's app
+
+Orca Cloud's app doesn't send a bot channel messages. An automation on **Slack message** can wake it for
+a channel's new top-level messages, and the gate's **Automation events** case checks them (the same
+rules, scripts and limits; the bot is told it is a channel message and may stay quiet with `NO_REPLY`).
+What Orca Cloud can't do: replies in threads (each thread has to be named), and keeping one conversation
+per thread (every message is a new run). Use your own Slack app for those.

@@ -1,85 +1,87 @@
 // The Slack wake gate's one decision: a normalized Slack event in, wake or block out. Any Slack
 // connector calls it right before an event would wake a bot.
 import {
+  effectiveSlackGate,
   slackGateApplies,
-  type BotSlackGate,
+  type BotSlackGateEdit,
   type SlackGateEvent
 } from '../../../shared/bots/bot-slack-gate'
-import type { Bot } from '../../../shared/bot-types'
-import type { SlackGateChoiceValue } from '../../../shared/bots/slack-gate-rules-config'
-import { readSlackGateKey, type SlackGateKeySlot } from './slack-gate-key'
+import { slackGateRulesExtended } from '../../../shared/bots/slack-gate-rules-config'
+import { readSlackGateKey } from './slack-gate-key'
 import { runSlackGateCommand, type SlackGateCommandRun } from './slack-gate-command'
-import { askSlackGateOpenAI, type SlackGateOpenAIOutcome } from './slack-gate-openai'
-import { decideSlackGateRules, type SlackGateRuleResult } from './slack-gate-rules'
+import { askSlackGateOpenAI } from './slack-gate-openai'
+import { commandEvent, SlackGateOpenAIRun } from './slack-gate-openai-run'
+import { SlackGateSlots, type SlackGateWork } from './slack-gate-slots'
+import type {
+  SlackGateBot,
+  SlackGateDecideOptions,
+  SlackGateDeps,
+  SlackGateOutcome,
+  SlackGateScriptRun,
+  SlackWakeDecision
+} from './slack-gate-types'
+import { SlackGateWakeCounts } from './slack-gate-wake-counts'
 
-export type SlackWakeDecision = {
-  verdict: 'wake' | 'block'
-  reason: 'not_gated' | 'passed' | 'blocked' | 'error' | 'cancelled' | 'expired'
-  durationMs: number
-  exitCode?: number | null
-  timedOut?: boolean
-  score?: number
-  /** OpenAI: each question's answer (numbers or choice values) and each rule's result. No message text. */
-  answers?: Record<string, number | SlackGateChoiceValue>
-  rules?: SlackGateRuleResult[]
-  /** OpenAI: the questions it declined to answer, by name (a failed check). */
-  refused?: string[]
-  error?: string
-}
-
-export type SlackGateBot = Pick<Bot, 'id' | 'name' | 'slackGate'>
-
-export type SlackGateDeps = {
-  readKey: (botId: string, slot: SlackGateKeySlot) => Promise<string | null>
-  runCommand: typeof runSlackGateCommand
-  askOpenAI: typeof askSlackGateOpenAI
-  now: () => number
-}
-
-export const SLACK_GATE_RUNNING_PER_BOT = 2
-export const SLACK_GATE_WAITING_PER_BOT = 16
-// A runner that ignores its stop gets this long before the decision goes on without it.
-const STOP_GRACE_MS = 2_000
+export type {
+  SlackGateBot,
+  SlackGateDecideOptions,
+  SlackGateDeps,
+  SlackGateScriptRun,
+  SlackWakeDecision
+} from './slack-gate-types'
+export { rulesScriptStdin } from './slack-gate-openai-run'
+export { SLACK_GATE_RUNNING_PER_BOT, SLACK_GATE_WAITING_PER_BOT } from './slack-gate-slots'
 
 type Stop = 'cancelled' | 'expired' | 'timeout'
-type Outcome =
-  | {
-      kind: 'verdict'
-      wake: boolean
-      exitCode?: number | null
-      score?: number
-      answers?: Record<string, number | SlackGateChoiceValue>
-      rules?: SlackGateRuleResult[]
-    }
-  | { kind: 'error'; error: string; exitCode?: number | null; timedOut?: true; refused?: string[] }
 
-class BotSlots {
-  running = 0
-  readonly waiting: (() => void)[] = []
-}
+/** The process's wake counts, shared by every Slack connector's gate. */
+export const slackGateWakeCounts = new SlackGateWakeCounts({ now: Date.now })
 
-/** A command gate's input is the event as it always was: newer gate-only fields stay out. */
-function commandEvent(event: SlackGateEvent): Omit<SlackGateEvent, 'contextIncomplete'> {
-  const { contextIncomplete: _gateOnly, ...rest } = event
-  return rest
+/** Whether a failed check never wakes: a channel message, or rules whose limits Orca can't honor
+ *  without an answer (a rules script may return limited rules; saved ones may have them). */
+function failsClosed(gate: BotSlackGateEdit, event: SlackGateEvent): boolean {
+  return (
+    event.case === 'channel_message' ||
+    (gate.kind === 'openai' &&
+      (gate.rulesCommand !== undefined || slackGateRulesExtended(gate.openai).limits))
+  )
 }
 
 export class SlackGateDecider {
-  private readonly slots = new Map<string, BotSlots>()
+  private readonly slots = new SlackGateSlots()
+  private readonly scriptRuns = new Map<string, SlackGateScriptRun>()
+  private readonly openaiRun: SlackGateOpenAIRun
 
-  constructor(private readonly deps: SlackGateDeps) {}
+  constructor(private readonly deps: SlackGateDeps) {
+    this.openaiRun = new SlackGateOpenAIRun(
+      deps,
+      deps.counts ?? slackGateWakeCounts,
+      this.scriptRuns
+    )
+  }
+
+  /** What the bot's rules script last did, since this process started. */
+  scriptRun(botId: string): SlackGateScriptRun | undefined {
+    return this.scriptRuns.get(botId)
+  }
 
   async decide(
     bot: SlackGateBot,
     event: SlackGateEvent,
-    options: { signal?: AbortSignal; deadlineAt?: number } = {}
+    options: SlackGateDecideOptions = {}
   ): Promise<SlackWakeDecision> {
     const startedAt = this.deps.now()
     const elapsed = () => Math.max(0, this.deps.now() - startedAt)
-    const gate = bot.slackGate
-    if (!gate || !slackGateApplies(bot, event)) {
-      return { verdict: 'wake', reason: 'not_gated', durationMs: 0 }
+    const stored = bot.slackGate
+    if (!stored || !slackGateApplies(bot, event)) {
+      // A channel message no gate takes never wakes the bot.
+      return {
+        verdict: event.case === 'channel_message' ? 'block' : 'wake',
+        reason: 'not_gated',
+        durationMs: 0
+      }
     }
+    const gate = effectiveSlackGate(stored)
     if (options.signal?.aborted) {
       return this.finish(bot, event, { verdict: 'block', reason: 'cancelled', durationMs: 0 })
     }
@@ -107,9 +109,11 @@ export class SlackGateDecider {
     }
     const onCancel = () => stopWith('cancelled')
     options.signal?.addEventListener('abort', onCancel, { once: true })
+    let outcome: SlackGateOutcome | undefined
     try {
-      const outcome = await this.withSlot(bot.id, stop.signal, () =>
-        this.run(bot, gate, event, stop.signal, timeoutAt)
+      const lane = event.case === 'channel_message' ? 'channel' : 'main'
+      outcome = await this.slots.run(bot.id, lane, stop.signal, () =>
+        this.run(bot, gate, event, stop.signal, timeoutAt, options.run)
       )
       const why: Stop | null = stopped
       if (why === 'cancelled' || why === 'expired') {
@@ -121,18 +125,26 @@ export class SlackGateDecider {
       }
       // A verdict that lands after the timeout is a failed check: the timeout already decided it.
       if (outcome.kind === 'verdict' && why !== 'timeout') {
-        return this.finish(bot, event, {
-          verdict: outcome.wake ? 'wake' : 'block',
-          reason: outcome.wake ? 'passed' : 'blocked',
+        const wake = outcome.wake
+        const decision: SlackWakeDecision = {
+          verdict: wake ? 'wake' : 'block',
+          reason: wake ? 'passed' : outcome.rateLimited ? 'rate_limited' : 'blocked',
           durationMs: elapsed(),
           ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}),
           ...(outcome.score !== undefined ? { score: outcome.score } : {}),
           ...(outcome.answers ? { answers: outcome.answers } : {}),
-          ...(outcome.rules ? { rules: outcome.rules } : {})
-        })
+          ...(outcome.rules ? { rules: outcome.rules } : {}),
+          ...(outcome.rulesFrom ? { rulesFrom: outcome.rulesFrom } : {}),
+          ...(wake && outcome.wakeReason ? { wakeReason: outcome.wakeReason } : {}),
+          ...(wake && outcome.reservation ? { reservation: outcome.reservation } : {})
+        }
+        if (wake) {
+          outcome = undefined
+        }
+        return this.finish(bot, event, decision)
       }
       return this.finish(bot, event, {
-        verdict: gate.onError,
+        verdict: failsClosed(gate, event) ? 'block' : gate.onError,
         reason: 'error',
         durationMs: elapsed(),
         error:
@@ -143,38 +155,44 @@ export class SlackGateDecider {
           ? { timedOut: true }
           : {}),
         ...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}),
-        ...(outcome.kind === 'error' && outcome.refused ? { refused: outcome.refused } : {})
+        ...(outcome.kind === 'error' && outcome.refused ? { refused: outcome.refused } : {}),
+        ...(outcome.rulesFrom ? { rulesFrom: outcome.rulesFrom } : {})
       })
     } finally {
       timers.forEach(clearTimeout)
       options.signal?.removeEventListener('abort', onCancel)
+      // A count reserved for a wake that didn't come out as one goes back.
+      if (outcome?.kind === 'verdict') {
+        outcome.reservation?.release()
+      }
     }
   }
 
   private async run(
     bot: SlackGateBot,
-    gate: BotSlackGate,
+    gate: BotSlackGateEdit,
     event: SlackGateEvent,
     signal: AbortSignal,
-    timeoutAt: number
-  ): Promise<{ outcome: Promise<Outcome>; released: Promise<void> }> {
+    timeoutAt: number,
+    run: SlackGateDecideOptions['run']
+  ): ReturnType<SlackGateWork> {
     const key = await this.deps
       .readKey(bot.id, gate.kind === 'command' ? 'command' : 'openai')
       .catch(() => null)
     // Stopped while the key was read: nothing launches.
     if (signal.aborted) {
-      const stopped: Outcome = { kind: 'error', error: 'Stopped' }
+      const stopped: SlackGateOutcome = { kind: 'error', error: 'Stopped' }
       return { outcome: Promise.resolve(stopped), released: Promise.resolve() }
     }
     if (gate.kind === 'command') {
-      const run: SlackGateCommandRun = this.deps.runCommand({
+      const command: SlackGateCommandRun = this.deps.runCommand({
         command: gate.command,
         stdin: JSON.stringify({ v: 1, botId: bot.id, botName: bot.name, ...commandEvent(event) }),
         key,
         timeoutMs: Math.max(1, timeoutAt - this.deps.now()),
         signal
       })
-      const outcome = run.outcome.then((result): Outcome => {
+      const outcome = command.outcome.then((result): SlackGateOutcome => {
         switch (result.kind) {
           case 'exit':
             return result.code === 0 || result.code === 1
@@ -188,106 +206,14 @@ export class SlackGateDecider {
             return { kind: 'error', error: result.error }
         }
       })
-      return { outcome, released: run.released }
+      return { outcome, released: command.released }
     }
-    const config = gate.openai
-    const asked = this.deps
-      .askOpenAI({ config, bot: { name: bot.name }, event, key, signal })
+    const asked = this.openaiRun.openai(bot, gate, event, key, signal, timeoutAt, run).catch(
       // Never the thrown message: a malformed key can appear in a header error, and errors reach
       // automation history.
-      .catch((): SlackGateOpenAIOutcome => ({ kind: 'error', error: 'OpenAI request failed' }))
-    const outcome = asked.then((result): Outcome => {
-      if (result.kind === 'error') {
-        return {
-          kind: 'error',
-          error: result.error,
-          ...(result.refused ? { refused: result.refused } : {})
-        }
-      }
-      const verdict = decideSlackGateRules(config, result.answers)
-      return {
-        kind: 'verdict',
-        wake: verdict.wake,
-        answers: verdict.answers,
-        rules: verdict.rules,
-        ...(verdict.score !== undefined ? { score: verdict.score } : {})
-      }
-    })
-    return { outcome, released: asked.then(() => undefined) }
-  }
-
-  /** Runs `work` in one of the bot's slots, held until its `released` settles. A stop or deadline
-   *  ends the wait for an answer even while `work` is still starting (a stalled key read). */
-  private async withSlot(
-    botId: string,
-    signal: AbortSignal,
-    work: () => Promise<{ outcome: Promise<Outcome>; released: Promise<void> }>
-  ): Promise<Outcome> {
-    const slots = this.slots.get(botId) ?? new BotSlots()
-    this.slots.set(botId, slots)
-    if (slots.running < SLACK_GATE_RUNNING_PER_BOT) {
-      slots.running += 1
-    } else if (slots.waiting.length >= SLACK_GATE_WAITING_PER_BOT) {
-      return { kind: 'error', error: 'Too many gate checks are waiting for this bot' }
-    } else if (!(await this.handedSlot(slots, signal))) {
-      return { kind: 'error', error: 'Stopped while waiting' }
-    }
-    const started = work()
-    void started
-      .then((run) => run.released)
-      .catch(() => undefined)
-      .then(() => this.free(botId, slots))
-    const giveUp = new Promise<Outcome>((resolve) => {
-      const onAbort = () => {
-        const timer = setTimeout(
-          () => resolve({ kind: 'error', error: 'Did not stop in time' }),
-          STOP_GRACE_MS
-        )
-        timer.unref?.()
-      }
-      if (signal.aborted) {
-        onAbort()
-      } else {
-        signal.addEventListener('abort', onAbort, { once: true })
-      }
-    })
-    const outcome = started.then(
-      (run) => run.outcome,
-      (): Outcome => ({ kind: 'error', error: 'The gate could not start' })
+      (): SlackGateOutcome => ({ kind: 'error', error: 'OpenAI request failed' })
     )
-    return await Promise.race([outcome, giveUp])
-  }
-
-  /** Waits for a running check to hand its slot over; false when stopped first. */
-  private handedSlot(slots: BotSlots, signal: AbortSignal): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      const ready = () => {
-        signal.removeEventListener('abort', give)
-        resolve(true)
-      }
-      const give = () => {
-        const at = slots.waiting.indexOf(ready)
-        if (at !== -1) {
-          slots.waiting.splice(at, 1)
-        }
-        resolve(false)
-      }
-      slots.waiting.push(ready)
-      signal.addEventListener('abort', give, { once: true })
-    })
-  }
-
-  /** A finished check hands its slot straight to the next waiter, so the count never dips. */
-  private free(botId: string, slots: BotSlots): void {
-    const next = slots.waiting.shift()
-    if (next) {
-      next()
-      return
-    }
-    slots.running -= 1
-    if (slots.running === 0 && this.slots.get(botId) === slots) {
-      this.slots.delete(botId)
-    }
+    return { outcome: asked, released: asked.then(() => undefined) }
   }
 
   private finish(
@@ -302,8 +228,11 @@ export class SlackGateDecider {
       verdict: decision.verdict,
       reason: decision.reason,
       durationMs: decision.durationMs,
+      ...(decision.rulesFrom ? { rulesFrom: decision.rulesFrom } : {}),
       ...(decision.exitCode !== undefined ? { exitCode: decision.exitCode } : {}),
-      ...(decision.score !== undefined ? { score: decision.score } : {}),
+      ...(decision.score !== undefined && decision.rulesFrom !== 'script'
+        ? { score: decision.score }
+        : {}),
       ...(decision.answers ? { answers: decision.answers } : {}),
       ...(decision.rules ? { rules: decision.rules } : {}),
       // Our own fixed sentences (status, question names), never a thrown message or a response body.
@@ -318,15 +247,22 @@ const shared = new SlackGateDecider({
   readKey: readSlackGateKey,
   runCommand: runSlackGateCommand,
   askOpenAI: askSlackGateOpenAI,
-  now: Date.now
+  now: Date.now,
+  counts: slackGateWakeCounts
 })
 
 /** Wake or block one Slack event for `bot`. `cancelled` and `expired` never follow onError: callers
- *  treat them as a refusal and an expired delivery. */
+ *  treat them as a refusal and an expired delivery. A decision with a `reservation` must be admitted,
+ *  committed or released by the caller. */
 export function decideSlackWake(
   bot: SlackGateBot,
   event: SlackGateEvent,
-  options?: { signal?: AbortSignal; deadlineAt?: number }
+  options?: SlackGateDecideOptions
 ): Promise<SlackWakeDecision> {
   return shared.decide(bot, event, options)
+}
+
+/** What the bot's rules script last did (settings page). */
+export function slackGateScriptRun(botId: string): SlackGateScriptRun | undefined {
+  return shared.scriptRun(botId)
 }

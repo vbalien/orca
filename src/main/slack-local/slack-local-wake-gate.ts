@@ -7,16 +7,24 @@ import {
   type SlackGateEvent
 } from '../../shared/bots/bot-slack-gate'
 import type { ConnectorAsker } from '../../shared/connector-asker-contract'
-import { decideSlackWake } from '../bots/slack-gate/slack-gate'
+import { decideSlackWake, type SlackWakeDecision } from '../bots/slack-gate/slack-gate'
 import { TextBudget } from '../connector-cloud/connector-wake-gate-event'
 import type { LocalSlackMessage } from './slack-local-events'
 
-/** Decides whether a message wakes the bot; anything but 'wake' posts nothing and starts nothing. */
+/** The gate's answer for one message: anything but 'wake' posts nothing and starts nothing. A wake may
+ *  carry why (for the bot) and a limited rule's count to settle once the delivery is known. */
+export type LocalSlackWakeVerdict = {
+  verdict: 'wake' | 'block'
+  wakeReason?: SlackWakeDecision['wakeReason']
+  reservation?: SlackWakeDecision['reservation']
+}
+
+/** Decides whether a message wakes the bot. */
 export type LocalSlackWakeGate = (
   bot: Bot,
   event: SlackGateEvent,
   options: { signal: AbortSignal; deadlineAt: number }
-) => Promise<'wake' | 'block'>
+) => Promise<LocalSlackWakeVerdict>
 
 /** The local message as the gate reads it. `historyUnknown`: a bare mention in a thread whose
  *  earlier messages weren't read whole, so what they asked before is unknown, not nothing.
@@ -28,6 +36,8 @@ export function localSlackGateEvent(input: {
   historyUnknown: boolean
   truncated: boolean
   gateContext?: NonNullable<SlackGateEvent['context']>
+  /** The case as the inbound decided it (a thread reply can be a channel message). */
+  case?: SlackGateEvent['case']
 }): SlackGateEvent {
   const { message, asker } = input
   const budget = new TextBudget()
@@ -62,7 +72,7 @@ export function localSlackGateEvent(input: {
   const incomplete = slackGateContextIncomplete(input.gateContext ?? asker.context)
   return {
     eventId: message.eventId,
-    case: message.case,
+    case: input.case ?? message.case,
     teamId: message.teamId,
     channelId: message.channelId,
     placeKind: placeOf(asker),
@@ -93,13 +103,21 @@ export function localSlackWakeGate(decide = decideSlackWake): LocalSlackWakeGate
   return async (bot, event, options) => {
     try {
       const decision = await decide(bot, event, options)
-      return decision.verdict === 'wake' &&
+      if (
+        decision.verdict === 'wake' &&
         decision.reason !== 'cancelled' &&
         decision.reason !== 'expired'
-        ? 'wake'
-        : 'block'
+      ) {
+        return {
+          verdict: 'wake',
+          ...(decision.wakeReason ? { wakeReason: decision.wakeReason } : {}),
+          ...(decision.reservation ? { reservation: decision.reservation } : {})
+        }
+      }
+      decision.reservation?.release()
+      return { verdict: 'block' }
     } catch {
-      return 'block'
+      return { verdict: 'block' }
     }
   }
 }

@@ -34,7 +34,8 @@ const FIRST_GITHUB_ANSWER_WAIT_MS = 3_000
 export type ConnectorCloudStore = ConnectorPlacesStore &
   ExternalConversationLinkStore &
   Pick<RuntimeStore, 'getSettings' | 'onSettingsChanged' | 'flushPendingOrThrowAsync'> &
-  Required<Pick<RuntimeStore, 'listAutomations' | 'listAutomationRuns'>>
+  Required<Pick<RuntimeStore, 'listAutomations' | 'listAutomationRuns'>> &
+  Pick<RuntimeStore, 'listAutomationRunsByAutomation'>
 
 export type ConnectorCloudHost = {
   runtime: OrcaRuntimeService
@@ -112,7 +113,10 @@ export function createConnectorCloud({
     botsEnabled: () => runtime.bots.enabled(),
     linkedBot: (key) => findLink(store, key)?.link.bot?.botId ?? null,
     mentionsKnown: muteDeps.mentionsKnown ?? (() => true),
-    heldStart: (key) => runtime.getExternalConversationSeam()?.receipts.heldStart(key) ?? false
+    heldStart: (key) => runtime.getExternalConversationSeam()?.receipts.heldStart(key) ?? false,
+    runsOf: (ids) =>
+      store.listAutomationRunsByAutomation?.(ids) ??
+      new Map(ids.map((id) => [id, store.listAutomationRuns(id)]))
   })
   const carriedDeferred = (entries: readonly ConnectorTurnAutomation[]) =>
     wakeGate.defersCarried(

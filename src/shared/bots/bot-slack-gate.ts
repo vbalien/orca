@@ -4,8 +4,15 @@ import * as z from 'zod'
 import { isPlainObject, type SlackGateRulesConfig } from './slack-gate-rules-config'
 import { validateSlackGateRules } from './slack-gate-rules-validate'
 
+/** The cases a gate's "Check" list picks from. Channel messages are picked apart (`channelMessages`), so a
+ *  build that doesn't know them still reads the gate. */
 export const SLACK_GATE_CASES = ['mention', 'dm', 'thread_reply', 'trigger'] as const
-export type SlackGateCase = (typeof SLACK_GATE_CASES)[number]
+export type SlackGateSettingCase = (typeof SLACK_GATE_CASES)[number]
+/** Every case an event can be: also a channel message no one addressed to the bot (own Slack app). */
+export const SLACK_GATE_EVENT_CASES = [...SLACK_GATE_CASES, 'channel_message'] as const
+export type SlackGateCase = (typeof SLACK_GATE_EVENT_CASES)[number]
+export const SLACK_GATE_CHANNELS_MAX = 100
+const SLACK_CHANNEL_ID = /^[CG][A-Z0-9]{2,31}$/
 
 export const SLACK_GATE_MAX_TIMEOUT_SECONDS = 20
 export const SLACK_GATE_OPENAI_DEFAULT_MODEL = 'gpt-6-luna'
@@ -22,12 +29,25 @@ const nonBlank = (max: number) =>
     .max(max)
     .refine((value) => value.trim().length > 0)
 
+const ChannelMessagesSchema = z.object({
+  channels: z
+    .array(z.string().regex(SLACK_CHANNEL_ID))
+    .min(1)
+    .max(SLACK_GATE_CHANNELS_MAX)
+    .refine((ids) => new Set(ids).size === ids.length)
+})
+
 const common = {
   on: z.boolean(),
-  appliesTo: z.array(z.enum(SLACK_GATE_CASES)).min(1).max(SLACK_GATE_CASES.length),
+  appliesTo: z.array(z.enum(SLACK_GATE_CASES)).max(SLACK_GATE_CASES.length),
+  /** The channels whose channel messages (own Slack app) it checks; absent: none are taken. */
+  channelMessages: ChannelMessagesSchema.optional(),
   timeoutSeconds: z.number().int().min(1).max(SLACK_GATE_MAX_TIMEOUT_SECONDS),
   onError: z.enum(['wake', 'block'])
 }
+/** A gate checks something: a case from its list, or channel messages. */
+const checksSomething = (gate: { appliesTo: readonly unknown[]; channelMessages?: unknown }) =>
+  gate.appliesTo.length > 0 || gate.channelMessages !== undefined
 
 /** OpenAI Decisions questions and the rules over their answers, checked field by field by the same
  *  validator the editor uses. */
@@ -44,11 +64,52 @@ export const BotSlackGateOpenAISchema = z
     }
   })
 
-export const BotSlackGateSchema = z.discriminatedUnion('kind', [
-  z.object({ ...common, kind: z.literal('command'), command: nonBlank(2000) }),
-  z.object({ ...common, kind: z.literal('openai'), openai: BotSlackGateOpenAISchema })
-])
+const openaiGate = {
+  ...common,
+  kind: z.literal('openai'),
+  /** What builds that know no note, limit or rules script read: the rules themselves, or a stand-in
+   *  that blocks every checked message (slack-gate-store-form). */
+  openai: BotSlackGateOpenAISchema,
+  /** A command that writes the rules for each message (or decides it); runs like a command gate. */
+  rulesCommand: nonBlank(2000).optional()
+}
+
+/** A gate as the editor and the save RPC hand it over: the whole rules, nothing projected. */
+export const BotSlackGateEditSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ ...common, kind: z.literal('command'), command: nonBlank(2000) }),
+    z.object(openaiGate)
+  ])
+  .refine(checksSomething)
+export type BotSlackGateEdit = z.infer<typeof BotSlackGateEditSchema>
+
+/** A gate as stored: `newer` holds the real rules and error policy when `openai`/`onError` were
+ *  projected for older builds. Older builds drop the fields they don't know. */
+export const BotSlackGateSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ ...common, kind: z.literal('command'), command: nonBlank(2000) }),
+    z.object({
+      ...openaiGate,
+      newer: z
+        .object({ openai: BotSlackGateOpenAISchema, onError: z.enum(['wake', 'block']).optional() })
+        .optional()
+    })
+  ])
+  .refine(checksSomething)
 export type BotSlackGate = z.infer<typeof BotSlackGateSchema>
+
+/** The gate as it runs and as the editor shows it: `newer`'s rules and error policy in place. */
+export function effectiveSlackGate(gate: BotSlackGate): BotSlackGateEdit {
+  if (gate.kind !== 'openai' || !gate.newer) {
+    if (gate.kind === 'openai') {
+      const { newer: _none, ...rest } = gate
+      return rest
+    }
+    return gate
+  }
+  const { newer, ...rest } = gate
+  return { ...rest, openai: newer.openai, onError: newer.onError ?? gate.onError }
+}
 
 /** One Slack message or event as every Slack connector hands it to the gate. Untrusted text. */
 export type SlackGateEvent = {
@@ -79,9 +140,14 @@ export type SlackGateEvent = {
 }
 
 function caseApplies(
-  appliesTo: readonly SlackGateCase[],
-  entry: { case: SlackGateCase; mentionUnknown?: true }
+  gate: Pick<BotSlackGate, 'appliesTo' | 'channelMessages'>,
+  entry: { case: SlackGateCase; mentionUnknown?: true },
+  channelId: string | undefined
 ): boolean {
+  const appliesTo: readonly SlackGateCase[] = gate.appliesTo
+  if (entry.case === 'channel_message') {
+    return channelId !== undefined && (gate.channelMessages?.channels.includes(channelId) ?? false)
+  }
   // A missed mention costs more than a needless wake: a message that may be either is checked
   // only when both are.
   if (entry.mentionUnknown) {
@@ -93,22 +159,27 @@ function caseApplies(
 /** The one applicability rule: the gate is on and the event, or any message in its turn, is selected. */
 export function slackGateApplies(
   bot: { slackGate?: BotSlackGate | null | undefined },
-  event: Pick<SlackGateEvent, 'case' | 'mentionUnknown' | 'later'>
+  event: Pick<SlackGateEvent, 'case' | 'mentionUnknown' | 'later'> & { channelId?: string }
 ): boolean {
   const gate = bot.slackGate
   if (!gate?.on) {
     return false
   }
-  return [event, ...(event.later ?? [])].some((entry) => caseApplies(gate.appliesTo, entry))
+  return [event, ...(event.later ?? [])].some((entry) => caseApplies(gate, entry, event.channelId))
 }
 
-/** Whether an update changes the command a gate runs (null/absent gates run none). */
+/** Whether an update changes a command the gate runs: a command gate's, or an OpenAI gate's rules script
+ *  (null/absent gates run none). */
 export function slackGateCommandChanged(
-  before: BotSlackGate | null | undefined,
-  after: BotSlackGate | null | undefined
+  before: BotSlackGate | BotSlackGateEdit | null | undefined,
+  after: BotSlackGate | BotSlackGateEdit | null | undefined
 ): boolean {
-  const command = (gate: BotSlackGate | null | undefined) =>
-    gate?.kind === 'command' ? gate.command : null
+  const command = (gate: BotSlackGate | BotSlackGateEdit | null | undefined) =>
+    gate?.kind === 'command'
+      ? `command:${gate.command}`
+      : gate?.rulesCommand
+        ? `rules:${gate.rulesCommand}`
+        : null
   return after !== undefined && command(before) !== command(after)
 }
 

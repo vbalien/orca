@@ -170,6 +170,34 @@ function validateSend(issues: Issues, send: unknown): void {
   }
 }
 
+/** A limit counts the one rule that woke the bot: with several wake rules they must combine "any", and no
+ *  other wake rule may share a limited rule's question (its count is kept by question). */
+function validateLimitsTogether(issues: Issues, rules: unknown, combine: unknown): void {
+  if (!Array.isArray(rules)) {
+    return
+  }
+  const wakes = rules
+    .slice(0, MAX_RULES)
+    .map((rule, index) => ({ rule, index }))
+    .filter(
+      (entry): entry is { rule: Record<string, unknown>; index: number } =>
+        isPlainObject(entry.rule) && entry.rule.wakeIf !== undefined
+    )
+  for (const { rule, index } of wakes) {
+    if (rule.limit === undefined) {
+      continue
+    }
+    if (wakes.length > 1 && combine !== 'any') {
+      issues.add(['rules', index, 'limit'], 'limit_needs_any')
+    }
+    if (wakes.some((other) => other.index !== index && other.rule.question === rule.question)) {
+      issues.add(['rules', index, 'limit'], 'limit_question_shared', {
+        question: String(rule.question)
+      })
+    }
+  }
+}
+
 export function validateSlackGateRules(value: unknown): SlackGateRulesValidation {
   const issues = new Issues()
   if (!isPlainObject(value)) {
@@ -243,6 +271,7 @@ export function validateSlackGateRules(value: unknown): SlackGateRulesValidation
       })
     }
   }
+  validateLimitsTogether(issues, value.rules, value.combine)
   for (const [key, allowed] of [
     ['combine', ['all', 'any']],
     ['whenUnsure', ['wake', 'block']]

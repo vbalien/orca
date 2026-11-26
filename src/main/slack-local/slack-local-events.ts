@@ -1,7 +1,8 @@
-// Which Slack events a bot's own app answers, read into one shape: a mention, a DM, or a reply in a
-// thread. Everything else (edits, other bots, the app's own posts, group DMs) is dropped here.
+// Which Slack events a bot's own app answers, read into one shape: a mention, a DM, a reply in a thread,
+// or a channel's top-level message (the inbound decides whether channel messages are taken at all).
+// Everything else (edits, deletes, joins, other bots, the app's own posts, group DMs) is dropped here.
 import { isSlackRecord } from './slack-web-api'
-export type LocalSlackCase = 'mention' | 'dm' | 'thread_reply'
+export type LocalSlackCase = 'mention' | 'dm' | 'thread_reply' | 'channel_message'
 
 export type LocalSlackMessage = {
   eventId: string
@@ -76,13 +77,10 @@ export function readLocalSlackEvent(
     kind = 'mention'
   } else if (event.type === 'message' && channelType === 'im') {
     kind = 'dm'
-  } else if (
-    event.type === 'message' &&
-    (channelType === 'channel' || channelType === 'group') &&
-    threadTs !== undefined
-  ) {
-    // The same message comes as app_mention too: one case for both, whichever arrives first.
-    kind = mentioned ? 'mention' : 'thread_reply'
+  } else if (event.type === 'message' && (channelType === 'channel' || channelType === 'group')) {
+    // The same message comes as app_mention too: one case for both, whichever arrives first. A reply
+    // in a thread reads as thread_reply here; the inbound tells a channel message from it by the thread.
+    kind = mentioned ? 'mention' : threadTs !== undefined ? 'thread_reply' : 'channel_message'
   } else {
     return null
   }

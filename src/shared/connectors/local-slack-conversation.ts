@@ -8,6 +8,9 @@ export type LocalSlackPlace = {
   /** The thread's root message; a DM's top-level message starts its own thread. */
   threadTs: string
   botUserId: string
+  /** The chat began with a channel message no one addressed to the bot (`:c` at the end). Builds
+   *  before it don't read such ids, so they never treat that thread's replies as the bot's. */
+  channel?: true
 }
 
 const SLACK_ID = /^[A-Z0-9]{2,32}$/
@@ -17,7 +20,8 @@ export function isLocalSlackConversation(key: { source: string } | null | undefi
   return key?.source === LOCAL_SLACK_SOURCE
 }
 
-/** `T:C:ts:UBOT`, the shape Slack thread ids take elsewhere in Orca. */
+/** `T:C:ts:UBOT`, the shape Slack thread ids take elsewhere in Orca; `T:C:ts:UBOT:c` for a chat a
+ *  channel message began. */
 export function localSlackConversation(place: LocalSlackPlace): {
   source: typeof LOCAL_SLACK_SOURCE
   externalId: string
@@ -25,14 +29,15 @@ export function localSlackConversation(place: LocalSlackPlace): {
   const { teamId, channelId, threadTs, botUserId } = place
   return {
     source: LOCAL_SLACK_SOURCE,
-    externalId: `${teamId}:${channelId}:${threadTs}:${botUserId}`
+    externalId: `${teamId}:${channelId}:${threadTs}:${botUserId}${place.channel ? ':c' : ''}`
   }
 }
 
 export function parseLocalSlackConversation(externalId: string): LocalSlackPlace | null {
   const [teamId, channelId, threadTs, botUserId, ...rest] = externalId.split(':')
+  const channel = rest.length === 1 && rest[0] === 'c'
   if (
-    rest.length > 0 ||
+    (rest.length > 0 && !channel) ||
     !teamId ||
     !channelId ||
     !threadTs ||
@@ -44,7 +49,7 @@ export function parseLocalSlackConversation(externalId: string): LocalSlackPlace
   ) {
     return null
   }
-  return { teamId, channelId, threadTs, botUserId }
+  return { teamId, channelId, threadTs, botUserId, ...(channel ? { channel: true as const } : {}) }
 }
 
 /** A ref that names a Linear or GitHub place for certain; a bare name or id could be Slack's. */

@@ -20,6 +20,7 @@
     "../src/main/**/*",
     // Fork: the wake gate tuning tool runs the app's own gate code, so it is checked with it.
     "../fork/gate-tune/**/*.ts",
+    "../fork/gate-rules-script/**/*.ts",
     "../src/cli/runtime/connection/transport.ts",
     "../src/cli/runtime/connection/types.ts",
     "../src/cli/runtime/connection/runtime-access-denied.ts",

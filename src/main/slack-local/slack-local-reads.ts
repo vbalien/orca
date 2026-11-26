@@ -31,14 +31,15 @@ export function slackLocalReads(fetchImpl: SlackFetch, botToken: string, signal:
   return {
     thread: async (
       channelId: string,
-      threadTs: string
+      threadTs: string,
+      readSignal?: AbortSignal
     ): Promise<{ messages: LocalSlackThreadMessage[]; complete: boolean }> => {
       const answer = await callSlack(
         fetchImpl,
         'conversations.replies',
         botToken,
         { channel: channelId, ts: threadTs, limit: THREAD_READ_LIMIT },
-        signal
+        readSignal ? AbortSignal.any([signal, readSignal]) : signal
       )
       return { messages: threadMessages(answer), complete: answer.has_more !== true }
     },

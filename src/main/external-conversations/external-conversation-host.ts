@@ -24,6 +24,9 @@ export type ExternalConversationHost = {
   /** Asked in a delivery's lane right before it reaches its chat (a Slack wake gate): an outcome
    *  settles the delivery with nothing delivered; null lets it go on. */
   admit?: ConversationAdmission
+  /** What the admission found worth telling the chat (a Slack wake gate's reason), once it let the
+   *  delivery go on; joined to the message's note. */
+  admitNote?: () => string | undefined
 }
 
 /** `link` is null when the conversation has no link; a link without a bot reads as `{}`. */

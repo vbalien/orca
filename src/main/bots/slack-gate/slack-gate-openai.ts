@@ -78,11 +78,15 @@ export function readSlackGateAnswer(
 }
 
 /** Every question's answer, matched by order and name. Any refusal fails the check, naming every
- *  question refused; otherwise the first missing or malformed answer does. */
+ *  question refused; otherwise the first missing or malformed answer does. `opaque`: the questions came
+ *  from a rules script, whose names may carry message text, so errors name them by number. */
 export function readSlackGateAnswers(
   questions: readonly SlackGateQuestion[],
-  body: unknown
+  body: unknown,
+  opaque = false
 ): SlackGateOpenAIOutcome {
+  const label = (question: SlackGateQuestion, index: number) =>
+    opaque ? `question ${index + 1}` : question.name
   const answers = isPlainObject(body) && Array.isArray(body.answers) ? body.answers : null
   if (!answers) {
     return { kind: 'error', error: 'OpenAI sent no answers' }
@@ -90,7 +94,7 @@ export function readSlackGateAnswers(
   const refused = questions.flatMap((question, index) => {
     const answer = answers[index]
     return isPlainObject(answer) && answer.type === 'refusal' && answer.name === question.name
-      ? [question.name]
+      ? [label(question, index)]
       : []
   })
   if (refused.length > 0) {
@@ -104,7 +108,7 @@ export function readSlackGateAnswers(
         ? readSlackGateAnswer(question, answer)
         : null
     if (!usable) {
-      return { kind: 'error', error: `OpenAI sent no usable answer for ${question.name}` }
+      return { kind: 'error', error: `OpenAI sent no usable answer for ${label(question, index)}` }
     }
     read[question.name] = usable
   }
@@ -118,6 +122,8 @@ export async function askSlackGateOpenAI(input: {
   key: string | null
   signal: AbortSignal
   fetch?: typeof fetch
+  /** The rules came from a rules script (see readSlackGateAnswers). */
+  opaque?: boolean
 }): Promise<SlackGateOpenAIOutcome> {
   if (!input.key) {
     return { kind: 'error', error: 'No OpenAI API key is saved for this bot.' }
@@ -149,5 +155,5 @@ export async function askSlackGateOpenAI(input: {
     await cancelUnreadResponseBody(response)
     return { kind: 'error', error: 'OpenAI sent an unreadable answer' }
   }
-  return readSlackGateAnswers(input.config.questions, body)
+  return readSlackGateAnswers(input.config.questions, body, input.opaque === true)
 }
