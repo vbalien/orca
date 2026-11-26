@@ -240,6 +240,14 @@ import {
   BotShareStatusParams,
   BotShareStop
 } from './bots-share-params'
+import { SlackGateBot, SlackGateSet, SlackGateSetKey } from './bots-slack-gate-params'
+import {
+  BotSlackLocalAskers,
+  BotSlackLocalBot,
+  BotSlackLocalOwner,
+  BotSlackLocalTokens,
+  BotSlackLocalUseOrca
+} from './bots-slack-local-params'
 import {
   BotToolAdd,
   BotToolFinishSignIn,
@@ -1353,6 +1361,17 @@ export const RPC_PARAMS_BY_METHOD = {
   'bots.slack.setPostAs': BotSlackPostAs,
   'bots.slack.setUpApp': BotSlackSetUp,
   'bots.slack.state': BotSlackBot,
+  'bots.slackGate.clearKey': SlackGateBot,
+  'bots.slackGate.set': SlackGateSet,
+  'bots.slackGate.setKey': SlackGateSetKey,
+  'bots.slackGate.status': SlackGateBot,
+  'bots.slackGate.update': SlackGateSet,
+  'bots.slackLocal.addAskers': BotSlackLocalAskers,
+  'bots.slackLocal.setOwner': BotSlackLocalOwner,
+  'bots.slackLocal.setTokens': BotSlackLocalTokens,
+  'bots.slackLocal.status': BotSlackLocalBot,
+  'bots.slackLocal.useLocal': BotSlackLocalBot,
+  'bots.slackLocal.useOrca': BotSlackLocalUseOrca,
   'bots.suggest': BotSuggest,
   'bots.suggestions.dismiss': BotSuggestionAct,
   'bots.suggestions.start': BotSuggestionAct,
