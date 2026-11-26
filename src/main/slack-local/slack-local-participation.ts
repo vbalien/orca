@@ -39,11 +39,20 @@ export class SlackLocalParticipation {
       .then(() => this.file.read())
       .then((read) => {
         const parsed = read.kind === 'ok' ? ParticipationFile.safeParse(read.value) : null
+        // What the file kept comes first, then what was joined since this record began (newest
+        // last), within the cap.
+        const joined = [...this.threads.keys()]
+        this.threads.clear()
         for (const id of parsed?.success ? parsed.data.threads : []) {
           if (this.linked(id)) {
             this.threads.set(id, true)
           }
         }
+        for (const id of joined) {
+          this.threads.delete(id)
+          this.threads.set(id, true)
+        }
+        this.trim()
       })
     return this.loading
   }
@@ -77,13 +86,7 @@ export class SlackLocalParticipation {
     }
     this.threads.delete(externalId)
     this.threads.set(externalId, true)
-    while (this.threads.size > KEPT) {
-      const oldest = this.threads.keys().next().value
-      if (oldest === undefined) {
-        break
-      }
-      this.threads.delete(oldest)
-    }
+    this.trim()
     this.seenInSlack.delete(externalId)
     this.save()
   }
@@ -100,6 +103,17 @@ export class SlackLocalParticipation {
       this.saving = false
       return this.file.write(() => ({ v: 1, threads: [...this.threads.keys()] }))
     })
+  }
+
+  /** Drops the oldest threads past the cap. */
+  private trim(): void {
+    while (this.threads.size > KEPT) {
+      const oldest = this.threads.keys().next().value
+      if (oldest === undefined) {
+        break
+      }
+      this.threads.delete(oldest)
+    }
   }
 
   /** An @mention is being delivered into a thread the bot hasn't joined: notices that come meanwhile

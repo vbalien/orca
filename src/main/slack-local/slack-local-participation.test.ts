@@ -1,6 +1,6 @@
 // Which channel-message threads a bot joined: forgetting them (off its own app, or deleted) closes the
 // record for good, so a mention still on its way when that happened never writes it again.
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -72,4 +72,27 @@ it('writes many threads joined at once in one go', async () => {
   await vi.waitFor(() => expect(JSON.parse(readFileSync(file(), 'utf8')).threads).toHaveLength(50))
   expect(writes).toHaveBeenCalledTimes(1)
   writes.mockRestore()
+})
+
+it('keeps the newest threads within the cap when what an earlier run kept is read back', async () => {
+  const path = file()
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(
+    path,
+    JSON.stringify({
+      v: 1,
+      threads: Array.from({ length: 20_000 }, (_, i) => `T1:C1:${i}.0:U0BOT:c`)
+    })
+  )
+  const record = new SlackLocalParticipations(() => true).of('b1')
+  record.add('T1:C1:new.0:U0BOT:c')
+  await record.load()
+  // The one joined now stays; the oldest kept one goes.
+  expect(record.has('T1:C1:new.0:U0BOT:c')).toBe(true)
+  expect(record.has('T1:C1:0.0:U0BOT:c')).toBe(false)
+  await vi.waitFor(() =>
+    expect(JSON.parse(readFileSync(path, 'utf8')).threads).toHaveLength(20_000)
+  )
+  record.add('T1:C1:newer.0:U0BOT:c')
+  expect(record.has('T1:C1:new.0:U0BOT:c')).toBe(true)
 })

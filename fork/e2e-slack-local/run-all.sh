@@ -5,9 +5,10 @@
 # Outside the namespace only to start it; needs node 24, unshare, Xvfb, dbus-run-session, gnome-keyring.
 set -u; source "$(dirname "$0")/env.sh"
 [ ${#R} -le 40 ] || { echo "E2E_RUN is too long for the keyring socket: $R"; exit 1; }
+run_dir_ok || exit 1
 N() { $E/ns.sh "$@"; }
 # Whatever happens from here, what this run started is stopped.
-trap '$E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder 2>/dev/null)" 2>/dev/null' EXIT
+trap '[ -f $R/.orca-e2e-run ] && { $E/stop-all.sh >/dev/null 2>&1; kill "$(cat $R/ns-holder 2>/dev/null)" 2>/dev/null; }' EXIT
 $E/boot.sh || exit 1
 mkdir -p $E/shots
 (cd $REPO && node --import tsx $E/gates.mts $REPO $R/gates "/usr/bin/node $R/channel-rules.mjs" >/dev/null) || exit 1

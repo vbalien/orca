@@ -29,7 +29,9 @@ export function BotSlackGateScriptField(props: {
         id={`${id}-rules-command`}
         variant="code"
         value={props.value}
-        disabled={!props.editable || !props.hostHasFeatures}
+        // Shown, selectable and copyable where it can't be changed (another computer's Orca).
+        readOnly={!props.editable}
+        disabled={!props.hostHasFeatures}
         aria-describedby={`${id}-rules-command-help`}
         onChange={(event) => props.onChange(event.target.value)}
       />
