@@ -30819,16 +30819,16 @@
     },
     "slackLocal": {
       "connection": {
-        "orca": "Connected through Orca Cloud’s Slack app. To use your own Slack app on this computer instead, remove this one first, then add Slack again."
+        "orca": "Connected through Orca Cloud’s Slack app. To use your own Slack app on {{computer}} instead, remove this one first, then add Slack again."
       },
       "chosen": "Open Slack in {{name}}’s Connectors to finish setting it up.",
       "choose": {
-        "help": "Or use a Slack app you make yourself. This computer talks to it directly, so messages don’t go through Orca Cloud.",
+        "help": "Or use a Slack app you make yourself. Orca on {{computer}} talks to it directly, so messages don’t go through Orca Cloud.",
         "button": "Use my own Slack app"
       },
       "state": {
-        "connectedTo": "Your own app in {{place}}, on this computer",
-        "connected": "Your own app, on this computer",
+        "connectedTo": "Your own app in {{place}}, on {{computer}}",
+        "connected": "Your own app, on {{computer}}",
         "needsTokens": "Paste your Slack app’s tokens",
         "setUp": "Set up",
         "error": "Slack refused the connection ({{code}})",
@@ -30839,7 +30839,7 @@
       },
       "switchBack": {
         "title": "Use Orca Cloud’s Slack app for {{name}}?",
-        "note": "This computer stops listening to your own app and forgets its tokens and the people added for it. Then add Slack again from Connectors.",
+        "note": "Orca on {{computer}} stops listening to your own app and forgets its tokens and the people added for it. Then add Slack again from Connectors.",
         "confirm": "Switch",
         "menu": "Switch to Orca Cloud’s Slack app…"
       },
@@ -30853,7 +30853,7 @@
         "title": "Tokens",
         "botPlaceholder": "xoxb-…",
         "appPlaceholder": "xapp-…",
-        "noKeyringNotSaved": "This computer has no OS keyring to seal Slack tokens with, so they can't be saved here. Nothing was saved."
+        "noKeyringNotSaved": "Slack tokens can't be saved: {{computer}} has no OS keyring to seal them with. Nothing was saved."
       },
       "owner": {
         "label": "Your Slack member ID",
@@ -30875,7 +30875,7 @@
       },
       "app": {
         "title": "Your Slack app",
-        "help": "Create an app at api.slack.com/apps from this manifest, install it to your workspace, then paste its two tokens below. Slack messages go straight between Slack and this computer.",
+        "help": "Create an app at api.slack.com/apps from this manifest, install it to your workspace, then paste its two tokens below. Slack messages go straight between Slack and {{computer}}.",
         "botTokenStep": "Bot User OAuth Token (xoxb-): OAuth & Permissions, after installing the app.",
         "appTokenStep": "App-Level Token (xapp-): Basic Information → App-Level Tokens, with the connections:write scope."
       },
@@ -30891,7 +30891,7 @@
         "cloudAppPresent": "Remove this bot's Orca Cloud Slack app first (its Slack settings, Remove), then use your own app.",
         "slackTriggers": "This bot has automations with Slack triggers, which don't run with your own Slack app yet. Remove their Slack triggers first.",
         "notLocal": "This bot doesn't use your own Slack app.",
-        "noKeyring": "This computer has no OS keyring to seal Slack tokens with, so they were not saved.",
+        "noKeyring": "Slack tokens were not saved: {{computer}} has no OS keyring to seal them with.",
         "botTokenFormat": "Paste the Bot User OAuth Token, which starts with xoxb-.",
         "appTokenFormat": "Paste the App-Level Token, which starts with xapp-.",
         "tokensRefused": "Slack didn't accept these tokens ({{code}}).",

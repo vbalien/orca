@@ -1,13 +1,13 @@
 # A bot's own Slack app (local Slack connector)
 
-A bot can answer Slack through a Slack app you create yourself. This computer connects to that app
+A bot can answer Slack through a Slack app you create yourself. The bot's computer connects to that app
 directly with Slack's Socket Mode, so Slack messages never pass through Orca Cloud. The bot's Linear
 and GitHub connections keep using Orca Cloud as before.
 
 This is stage 1. It does:
 
 - take mentions (`@bot …`), direct messages, and replies in threads the bot was asked in;
-- check Who can ask on this computer (you, and the people you add by Slack member ID);
+- check Who can ask on the bot's computer (you, and the people you add by Slack member ID);
 - post the bot's final message in the same thread.
 
 It does not yet do: a working status or streaming answer, a Stop button, answering approval or
@@ -15,9 +15,17 @@ question cards from Slack (the bot says it needs an answer in Orca), `orca slack
 automation triggers, files, or the Slack mirror of messages typed in Orca. Those come in later stages
 and are refused clearly until then.
 
-It runs only in the Orca desktop app, and only while that app is open on this computer.
-Like Orca Cloud's own connector, it connects to Slack directly: Orca's proxy setting is not applied
-to it yet.
+It runs on the computer the bot runs on, in Orca's Electron runtime: the Orca desktop app while it is
+open, or `orca serve` started with `ORCA_SERVE_RUNTIME=electron` (the Node runtime, orcad, refuses it
+with that hint). For a bot on a server, set everything up from a computer paired with it: the
+Slack settings there talk to the server, and the tokens are sealed in the server's OS keyring (on
+Linux, a logged-in session's keyring such as gnome-keyring). An agent's `orca` CLI can't change
+these settings, and a phone can't either.
+
+Each bot on its own app holds one Socket Mode WebSocket to Slack from that computer (Slack allows up
+to 10 per app). While that computer or Orca is off, the app is offline, and mentions sent meanwhile
+may never reach Orca (Slack retries an undelivered event only for a short while). Like Orca Cloud's own
+connector, it connects to Slack directly: Orca's proxy setting is not applied to it yet.
 
 ## 1. Create the Slack app
 
@@ -78,7 +86,7 @@ Notes:
 
 - `agent_view` makes the app an agent in Slack (new apps can only use `agent_view`; an older app's
   switch from `assistant_view` to `agent_view` can't be undone).
-- `socket_mode_enabled: true`: Slack sends events over a connection this computer opens, so no
+- `socket_mode_enabled: true`: Slack sends events over a connection the bot's computer opens, so no
   public URL is needed. Socket Mode apps can't be listed in the Slack Marketplace, which a
   personal bot doesn't need.
 - Stage 1 reads `app_mention`, `message.im`, `message.channels` and `message.groups`. The other
@@ -105,7 +113,7 @@ Keep both private. Orca never shows them again once saved.
    until you add other people by their member IDs.
 4. Invite the bot to the channels where it should answer (`/invite @bot`).
 5. Optional: **Check before waking** (at the end of the same page) works as it does with Orca Cloud's
-   app. It runs on this computer after Who can ask, before the bot wakes. A blocked check starts
+   app. It runs on the bot's computer after Who can ask, before the bot wakes. A blocked check starts
    nothing and posts nothing; a check that fails or passes its own timeout does what its **On
    error** setting says; one still undecided after 60 seconds, or cut off by the app disconnecting,
    starts nothing. It reads the message, its place, the asker's
